@@ -1,0 +1,875 @@
+unit CAuditoriaOnLine;
+
+interface
+
+uses CBDT, SysUtils, DBTables, CUtiles, CIDBFM, Classes, CAuditoriaCCB, CFacturacionCCB,
+     Contnrs, CPadronOSCCB, CListar, CObrasSocialesCCB, CProfesionalCCB, CDiagnosticosCCBOMS,
+     CMedicosCCBOS, CMedicosCabAO, CFirebird;
+
+type
+
+TTAuditoriaOnLine = class
+  Idonline, Nroauditoria, Fecha, Efector, Codos, Idzona, Nrodoc, Idprof, Observacion,
+  Iddiag, Diferida, Fepedido, Auditada, Transferida, Altapac, Obsauditor, Referencia, Nroautorizacion: String;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    BuscarReferencia(xidonline: string): boolean;
+  function    BuscarReferenciaSinProfesional(xidonline: string): boolean;
+  function    BuscarPorNroAuditoria(xnroauditoria: string): boolean;
+  procedure   BorrarReferencia(xidonline: string);
+  function    VerificarSiEstaPendiente(xnroauditoria: string): boolean;
+  function    getNroInterno(xidonline: string): string;
+  function    ImportarOrdenesOnline: TStringList;
+  function    SincronizarDeterminaciones: TStringList;
+  function    setOrdenesImportadas(xdesde, xhasta, xestado: string): TObjectList;
+
+  procedure   MarcarOrdenAuditada(xidorden, xobsauditor: string);
+  function    getObsAuditor(xidorden: string): string;
+  procedure   MarcarOrdenTransferida(xlista: TStringList);
+  function    getObservacion(xidorden: string): string;
+
+  procedure   Exportar(xlista: TStringList);
+
+  procedure   ListarControl(xdesde, xhasta: string; salida: char);
+  procedure   ListarControlPorProfesional(xdesde, xhasta: string; salida: char);
+
+  procedure   AjustarEstados(xdesde: string);
+
+  function    getOrdenes(xdesde, xhasta, xidprof: string): TQuery;
+
+  procedure   ChequearReferencias;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  cabref: TTable;
+  ffirebird: TTFirebird;
+  lote: TStringList;
+end;
+
+function auditonline: TTAuditoriaOnLine;
+
+implementation
+
+var
+  xauditoriaonline: TTAuditoriaOnLine = nil;
+
+constructor TTAuditoriaOnLine.Create;
+var
+  directorio: string;
+begin
+  if dbs.BaseClientServ = 'N' then directorio := dbs.DirSistema + '\auditoria' else directorio := 'auditoriaccb';
+
+  dbs.getParametrosDB1;     // Base de datos adicional 1
+  if Length(Trim(dbs.db1)) > 0 then Begin
+    dbs.NuevaBaseDeDatos(dbs.db1, dbs.us1, dbs.pa1);
+    directorio   := dbs.baseDat_N;
+  end else
+    directorio := dbs.DirSistema + '\auditoria';
+
+  cabref := datosdb.openDB('cab_ref', '', '', directorio);
+end;
+
+destructor TTAuditoriaOnLine.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function TTAuditoriaOnLine.BuscarReferencia(xidonline: string): boolean;
+begin
+  if (cabref.IndexFieldNames <> 'IDONLINE') then cabref.IndexFieldNames := 'IDONLINE';
+  cabref.FindKey([xidonline]);
+  if (trim(xidonline) = trim(cabref.FieldByName('idonline').AsString)) then result := true else result := false;
+end;
+
+procedure TTAuditoriaOnLine.BorrarReferencia(xidonline: string);
+begin
+  if (cabref.IndexFieldNames <> 'IDONLINE') then cabref.IndexFieldNames := 'IDONLINE';
+  if (cabref.FindKey([xidonline])) then begin
+    cabref.Delete;
+    datosdb.refrescar(cabref);
+  end;
+end;
+
+function TTAuditoriaOnLine.BuscarReferenciaSinProfesional(xidonline: string): boolean;
+// Objetivo...: Buscar un Profesional sin referencia
+begin
+  if not (cabref.Active) then cabref.Open;  
+  if (cabref.IndexFieldNames <> 'REFRENCIA') then cabref.IndexFieldNames := 'REFERENCIA';
+  if cabref.FindKey([xidonline]) then
+    nroauditoria := cabref.FieldByName('nroauditoria').AsString
+  else
+    nroauditoria := '';
+  if (length(trim(cabref.FieldByName('referencia').AsString)) >= 20) then result := true else result := false;
+end;
+
+function TTAuditoriaOnLine.BuscarPorNroAuditoria(xnroauditoria: string): boolean;
+// Objetivo...: buscar por número interno
+begin
+  cabref.IndexFieldNames := 'NROAUDITORIA';
+  result := cabref.FindKey([xnroauditoria]);
+end;
+
+function TTAuditoriaOnLine.VerificarSiEstaPendiente(xnroauditoria: string): boolean;
+// Objetivo...: verificar si esta pendiente por nro. de auditoria
+begin
+  if (BuscarPorNroAuditoria(xnroauditoria)) then begin
+    if (cabref.FieldByName('auditada').AsString = 'S') then result := true else
+      result := false;
+  end else
+    result := false;
+end;
+
+function TTAuditoriaOnLine.getNroInterno(xidonline: string): string;
+// Objetivo...: Recuperar número interno
+begin
+  if (cabref.IndexFieldNames <> 'REFERENCIA') then cabref.IndexFieldNames := 'REFERENCIA';
+  if (cabref.FindKey([xidonline])) then
+    result := cabref.FieldByName('nroauditoria').AsString
+  else
+    result := '';
+end;
+
+function TTAuditoriaOnLine.ImportarOrdenesOnline: TStringList;
+// Objetivo...: Importar Ordenes OnLine Importadas
+var
+  directorio: string;
+  archivos, existepadron: boolean;
+  cab, det, pac, pen, dxx, med, mec: TextFile;
+  linea1, linea2, linea3, linea4, nuevo_nroauditoria: string;
+  iidonline, inroauditoria, iefector, ifecha, icodos, iidzona, inrodoc,
+  iidprof, ifepedido, iobservacion, iiddiag, idiferida, inombre, iprofcab: string;
+  didonline, ditems, dcodigo, destado, altapac, codosanter, iobsauditor, ianulada, iid, imontoon,
+  var1, var2, var3, var4, var5, expediente, nroaut: string;
+  imonto, icoseguro: real;
+  lista, listaos, lista_det, lista_pac, lista_cab: TStringList; i, p, a, k, m: integer;
+begin
+  diagnosticooms.conectar;
+  medicoos.conectar;
+  medicoscabol.conectar;
+
+  archivos   := false;
+  directorio := dbs.DirSistema + '\auditoria\online\download\';
+  if (FileExists(directorio + 'cab_auditoria.txt')) then
+    if (FileExists(directorio + 'det_auditoria.txt')) then archivos := true;
+
+  if (archivos) then begin
+
+    AssignFile(cab, directorio + 'cab_auditoria.txt');
+    AssignFile(det, directorio + 'det_auditoria.txt');
+    AssignFile(pac, directorio + 'pac_auditoria.txt');
+    AssignFile(pen, directorio + 'pendientes.txt');
+    AssignFile(dxx, directorio + 'diagnosticos.txt');
+    AssignFile(med, directorio + 'medicos.txt');
+    AssignFile(mec, directorio + 'medicos_cab.txt');
+
+    listaos := TStringList.Create;
+    lista_det := TStringList.Create;
+    lista_pac := TStringList.Create;
+    lista_cab := TStringList.Create;
+
+    reset(det);
+    while not EOF(det) do begin
+      readln(det, linea2);
+      lista_det.Add(linea2);
+    end;
+    closeFile(det);
+
+    if (FileExists(directorio + 'pac_auditoria.txt')) then begin
+      reset(pac);
+      while not EOF(pac) do begin
+        readln(pac, linea3);
+        lista_pac.Add(linea3);
+      end;
+      closeFile(pac);
+    end;
+
+    reset(cab);
+    while not EOF(cab) do begin
+      readln(cab, linea1);
+      lista_cab.Add(linea1);
+    end;
+    closeFile(cab);
+
+    //while not EOF(cab) do begin
+    for m := 1 to lista_cab.Count do begin
+      //readln(cab, linea1);
+      linea1 := lista_cab.Strings[m-1];
+      if (length(trim(linea1)) > 0) and (length(trim(copy(linea1, 1, 29))) > 10) then begin
+        iidonline    := copy(linea1, 1, 29);
+        iefector     := copy(linea1, 32, 6);
+        ifecha       := copy(linea1, 39, 8);
+        icodos       := copy(linea1, 48, 6);
+        iidzona      := copy(linea1, 55, 2);
+        inrodoc      := UpperCase(trim(copy(linea1, 59, 15)));
+        iidprof      := copy(linea1, 76, 5);
+        ifepedido    := ifecha; // copy(linea1, 102, 8);
+        iiddiag      := copy(linea1, 113, 5);
+        idiferida    := copy(linea1, 123, 1);
+        ianulada     := copy(linea1, 125, 1);
+        iprofcab     := copy(linea1, 526, 6);
+        expediente   := copy(linea1, 533, 20);
+        nroaut       := copy(linea1, 554, 20);
+
+        if (length(trim(ianulada)) = 0) then ianulada := 'N';
+
+        if (listaos.Count = 0) then listaos.Add(icodos) else
+          if not (utiles.verificarItemsLista(listaos, icodos)) then listaos.Add(icodos);
+
+        p            := Pos('*** End of Efector ***', linea1);
+        a            := Pos('*** End of Auditor ***', linea1);
+        iobservacion := trimleft(copy(linea1, 127, p - 127));
+        iobsauditor  := trimleft(copy(linea1, 301, 130));
+
+        // Buscamos la orden online, si no está, la damos de alta
+        if not (BuscarReferencia(iidonline)) then
+          nuevo_nroauditoria := utiles.sLlenarIzquierda(auditoriacb.setNuevoNroAuditoria, 10, '0')
+        else
+          nuevo_nroauditoria := cabref.FieldByName('nroauditoria').AsString;
+
+        altapac := 'N';
+        if (icodos <> codosanter) then begin
+          existepadron := padron.conectar(icodos);
+        end;
+        codosanter := icodos;
+
+        if (existepadron) then
+          if (padron.Buscar(icodos, inrodoc)) then altapac := 'S' else altapac := 'S';
+
+        // Alta en la tabla Pivot
+        if cabref.FindKey([iidonline]) then cabref.Edit else cabref.Append;
+        cabref.FieldByName('idonline').AsString     := iidonline;
+        cabref.FieldByName('nroauditoria').AsString := nuevo_nroauditoria;
+        cabref.FieldByName('efector').AsString      := iefector;
+        cabref.FieldByName('fecha').AsString        := ifecha;
+        cabref.FieldByName('codos').AsString        := icodos;
+        cabref.FieldByName('idzona').AsString       := iidzona;
+        cabref.FieldByName('nrodoc').AsString       := inrodoc;
+        cabref.FieldByName('idprof').AsString       := iidprof;
+        cabref.FieldByName('fepedido').AsString     := ifepedido;
+        cabref.FieldByName('iddiag').AsString       := iiddiag;
+        cabref.FieldByName('diferida').AsString     := idiferida;
+        cabref.FieldByName('observacion').AsString  := iobservacion;
+        cabref.FieldByName('altapac').AsString      := altapac;
+        cabref.FieldByName('obsauditor').AsString   := iobsauditor;
+        cabref.FieldByName('anulada').AsString      := ianulada;
+        cabref.FieldByName('referencia').AsString   := trim(copy(iidonline, 7, 25));
+        cabref.FieldByName('auditor').AsString      := copy(linea1, 474, 10);
+        cabref.FieldByName('auditado').AsString     := copy(linea1, 490, 20);
+        cabref.FieldByName('profcab').AsString      := copy(linea1, 526, 6);
+        try
+          cabref.Post
+         except
+          cabref.Cancel
+        end;
+        datosdb.refrescar(cabref);
+
+        // Extraemos los items de la Orden
+        lista := TStringList.Create;
+        i := 0;
+        for k := 1 to lista_det.Count do begin
+          if (copy(lista_det.Strings[k-1], 1, 29) = iidonline) then begin
+            inc(i);
+            lista.Add(lista_det.Strings[k-1]);
+          end;
+        end;
+        
+        {reset(det); i := 0;
+        while not EOF(det) do begin
+          readln(det, linea2);
+          if (copy(linea2, 1, 29) = iidonline) then begin
+            inc(i);
+            lista.Add(linea2);
+          end;
+        end;
+        closeFile(det);}
+
+        // Extraemos el nombre del Paciente
+        {if (FileExists(directorio + 'pac_auditoria.txt')) then begin
+          reset(pac);
+          while not EOF(pac) do begin
+            readln(pac, linea3);
+            if (trim(copy(linea3, 9, 15)) = trim(inrodoc)) then begin
+              inombre := copy(linea3, 25, 35);
+              break;
+            end;
+          end;
+          closeFile(pac);
+
+          // Damos de alta paciente
+          padron.Guardar(icodos, inrodoc, inombre);
+        end;}
+
+        // Extraemos el nombre del Paciente
+        if (lista_pac.Count > 0) then begin
+          for k := 1 to lista_pac.Count do begin
+            if (trim(copy(lista_pac.Strings[k-1], 9, 15)) = trim(inrodoc)) then begin
+              inombre := copy(lista_pac.Strings[k-1], 25, 35);
+              break;
+            end;
+          end;
+
+          // Damos de alta paciente
+          padron.Guardar(icodos, inrodoc, inombre);
+        end;
+
+        // Damos de Alta la Orden
+        auditoriacb.Registrar(nuevo_nroauditoria, utiles.sFormatoFecha(ifecha), icodos, iidzona, inrodoc, inombre, iidprof, '', '', '', '', icodos, utiles.sFormatoFecha(ifepedido), iprofcab, iiddiag, iobservacion, false, 'S', ianulada, expediente, nroaut);
+        for i := 1 to lista.Count do begin
+          didonline := copy(lista.Strings[i-1], 1, 29);
+          ditems    := copy(lista.Strings[i-1], 32, 3);
+          dcodigo   := copy(lista.Strings[i-1], 37, 6);
+          destado   := copy(lista.Strings[i-1], 45, 1);
+          if (destado = 'A') then
+            imontoon  := utiles.FormatearNumero(trim(copy(lista.Strings[i-1], 48, 20)))
+          else
+            imontoon := '0';
+          imonto    := 0;
+
+          if (length(trim(copy(lista.Strings[i-1], 74, 5))) > 0) then
+            icoseguro := StrToFloat( utiles.FormatearNumero(trim(copy(lista.Strings[i-1], 74, 20))) )
+          else
+            icoseguro := 0;
+
+          auditoriacb.RegistrarItems(nuevo_nroauditoria, ditems, dcodigo, '', destado, imonto, 0, lista.Count, false, 'S', ianulada, StrToFloat(imontoon), icoseguro);
+        end;
+
+        lista.Free; lista := Nil;
+      end;
+
+    end;
+
+    //closeFile(cab);
+
+    // Marcamos las ordenes Pendientes
+    datosdb.tranSQL(cabref.DatabaseName, 'update ' + cabref.TableName + ' set auditada = ' + '''' + '''' + ' where auditada = ' + '''' + 'P' + '''');
+    datosdb.refrescar(cabref);
+    auditoriacb.QuitarMarcaDePendiente;
+
+    if (FileExists(directorio + 'pendientes.txt')) then begin
+      reset(pen);
+      while not eof(pen) do begin
+        readln(pen, linea1);
+        iidonline    := copy(linea1, 1, 29);
+        if (BuscarReferencia(iidonline)) then begin
+          cabref.Edit;
+          cabref.FieldByName('auditada').AsString := 'P';
+          try
+            cabref.Post
+           except
+            cabref.Cancel
+          end;
+          auditoriacb.MarcarComoPendiente(cabref.FieldByName('nroauditoria').AsString);
+        end;
+      end;
+      closeFile(pen);
+    end;
+
+  end;
+
+  // Importamos los diagnosticos
+  if (FileExists(directorio + 'diagnosticos.txt')) then begin
+    reset(dxx);
+    while not eof(dxx) do begin
+      readln(dxx, linea1);
+      var1 := trim(copy(linea1, 1, 7));
+      var2 := trim(copy(linea1, 10, 5));
+      var3 := trim(copy(linea1, 16, 4));
+      var4 := trim(copy(linea1, 22, 4));
+      var5 := copy(linea1, 29, 150);
+
+      diagnosticooms.Grabar(var1, var2, var3, var4, var5, '', true);
+    end;
+    closeFile(dxx);
+  end;
+
+  // Importamos los medicos
+  if (FileExists(directorio + 'medicos.txt')) then begin
+    reset(med);
+    while not eof(med) do begin
+      readln(med, linea1);
+      var1 := trim(copy(linea1, 1, 6));
+      var2 := trim(copy(linea1, 8, 5));
+      var3 := trim(copy(linea1, 14, 8));
+      var4 := trim(copy(linea1, 25, 5));
+      var4 := trim(copy(linea1, 36, 8));
+      var5 := copy(linea1, 52, 150);
+
+      medicoos.Grabar(var1, var2, var5);
+    end;
+    closeFile(med);
+  end;
+
+  // Importamos los medicos de cabecera
+  if (FileExists(directorio + 'medicos_cab.txt')) then begin
+    reset(mec);
+    while not eof(mec) do begin
+      readln(mec, linea1);
+      var1 := trim(copy(linea1, 1, 6));
+      var2 := trim(copy(linea1, 8, 5));
+      var3 := trim(copy(linea1, 14, 8));
+      var4 := trim(copy(linea1, 25, 5));
+      var4 := trim(copy(linea1, 36, 8));
+      var5 := copy(linea1, 52, 150);
+
+      medicoscabol.Grabar(var1, var2, var5);
+    end;
+    closeFile(mec);
+  end;
+
+  diagnosticooms.desconectar;
+  medicoos.desconectar;
+  medicoscabol.desconectar;
+
+  lista_cab.Destroy; lista_det.Destroy; lista_pac.Destroy;
+
+  result := listaos;
+end;
+
+function TTAuditoriaOnLine.SincronizarDeterminaciones: TStringList;
+// Objetivo...: Importar Ordenes OnLine Importadas
+var
+  directorio: string;
+  archivos, existepadron: boolean;
+  det: TextFile;
+  linea1, linea2, linea3, nuevo_nroauditoria: string;
+  iidonline, inroauditoria, iefector, ifecha, icodos, iidzona, inrodoc,
+  iidprof, ifepedido, iobservacion, iiddiag, idiferida, inombre: string;
+  didonline, ditems, dcodigo, destado, altapac, codosanter, iobsauditor, ianulada,
+  iid, imontoon: string;
+  imonto: real;
+  i, p: integer;
+  lista: TStringList;
+begin
+  lista := TStringList.Create;
+
+  archivos   := false;
+  directorio := dbs.DirSistema + '\auditoria\online\download\';
+  if (FileExists(directorio + 'cab_auditoria.txt')) then
+    if (FileExists(directorio + 'det_auditoria.txt')) then archivos := true;
+      if (FileExists(directorio + 'pac_auditoria.txt')) then archivos := true;
+
+  if (archivos) then begin
+
+    AssignFile(det, directorio + 'det_auditoria.txt');
+
+    reset(det); i := 0;
+    while not EOF(det) do begin
+      readln(det, linea2);
+      didonline := copy(linea2, 1, 29);
+      ditems    := copy(linea2, 32, 3);
+      dcodigo   := copy(linea2, 37, 6);
+      destado   := copy(linea2, 45, 1);
+      if (destado = 'A') then
+        imontoon := utiles.FormatearNumero(trim(copy(linea2, 48, 20)))
+      else
+        imontoon := '0';
+      imonto    := facturacion.setImporteAnalisis(icodos, dcodigo, Copy(utiles.sFormatoFecha(ifecha), 4, 2) + '/' + Copy(utiles.sExprFecha2000(utiles.sFormatoFecha(ifecha)), 1, 4)) + facturacion.setTot9984;
+      if (BuscarReferencia(didonline)) then begin
+        nuevo_nroauditoria := cabref.FieldByName('nroauditoria').AsString;
+        auditoriacb.SincronizarItems(nuevo_nroauditoria, ditems, dcodigo, '', destado, imonto, 0, false, 'S', ianulada, StrToFloat(imontoon));
+      end;
+    end;
+
+    //auditoriacb.vaciarBuffer;
+
+    closeFile(det);
+
+
+    // Armamos una lista de obras sociales
+    AssignFile(det, directorio + 'cab_auditoria.txt');
+
+    reset(det); i := 0;
+    while not EOF(det) do begin
+      readln(det, linea2);
+      icodos       := copy(linea2, 48, 6);
+
+      if (lista.Count = 0) then lista.Add(icodos) else
+          if not (utiles.verificarItemsLista(lista, icodos)) then lista.Add(icodos);
+
+    end;  
+    closeFile(det);
+  end;
+
+  result := lista;
+end;
+
+function TTAuditoriaOnLine.setOrdenesImportadas(xdesde: string; xhasta, xestado: string): TObjectList;
+// Objetivo...: devolver las Ordenes Importadas
+var
+  r: TQuery;
+  objeto: TTAuditoriaOnLine;
+  l: TObjectList;
+begin
+  if (xestado = '1') then
+    r := datosdb.tranSQL(cabref.DatabaseName, 'select idonline, codos, nroauditoria, efector, fecha, nrodoc, iddiag, diferida, idzona, idprof, fepedido, auditada, transferida, altapac from cab_ref where fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''' + ' AND diferida = ' + '''' + 'S' + '''' + ' order by fecha');
+  if (xestado = '2') then
+    r := datosdb.tranSQL(cabref.DatabaseName, 'select idonline, codos, nroauditoria, efector, fecha, nrodoc, iddiag, diferida, idzona, idprof, fepedido, auditada, transferida, altapac from cab_ref where fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''' + ' order by fecha');
+  if (xestado = '3') then
+    r := datosdb.tranSQL(cabref.DatabaseName, 'select idonline, codos, nroauditoria, efector, fecha, nrodoc, iddiag, diferida, idzona, idprof, fepedido, auditada, transferida, altapac from cab_ref where fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''' + ' order by efector, codos, fecha');
+
+  l := TObjectList.Create;
+  r.Open;
+  while not r.Eof do begin
+    objeto := TTAuditoriaOnLine.Create;
+    objeto.Idonline     := r.FieldByName('idonline').AsString;
+    objeto.Nroauditoria := r.FieldByName('nroauditoria').AsString;
+    objeto.Fecha        := utiles.sFormatoFecha(r.FieldByName('fecha').AsString);
+    objeto.Efector      := r.FieldByName('efector').AsString;
+    objeto.Codos        := r.FieldByName('codos').AsString;
+    objeto.Idzona       := r.FieldByName('idzona').AsString;
+    objeto.Nrodoc       := r.FieldByName('nrodoc').AsString;
+    objeto.Idprof       := r.FieldByName('idprof').AsString;
+    objeto.Iddiag       := r.FieldByName('iddiag').AsString;
+    objeto.diferida     := r.FieldByName('diferida').AsString;
+    objeto.Fepedido     := utiles.sFormatoFecha(r.FieldByName('fepedido').AsString);
+    objeto.altapac      := r.FieldByName('altapac').AsString;
+    if (r.FieldByName('auditada').AsString = 'S') then
+      objeto.auditada   := r.FieldByName('auditada').AsString
+    else
+      objeto.Auditada   := 'N';
+    if (r.FieldByName('transferida').AsString = 'S') then
+      objeto.transferida := r.FieldByName('transferida').AsString
+    else
+      objeto.transferida := 'N';
+    l.Add(objeto);
+    r.Next;
+  end;
+  r.Close; r.Free;
+
+  result := l;
+end;
+
+procedure TTAuditoriaOnLine.MarcarOrdenAuditada(xidorden, xobsauditor: string);
+// Objetivo...: marcar la orden como auditada
+begin
+  if (BuscarReferencia(xidorden)) then begin
+    cabref.Edit;
+    cabref.FieldByName('auditada').AsString   := 'S';
+    cabref.FieldByName('obsauditor').AsString := xobsauditor;
+    try
+      cabref.Post
+     except
+      cabref.Cancel
+    end;
+    datosdb.closeDB(cabref); cabref.Open;
+  end;
+end;
+
+function TTAuditoriaOnLine.getObsAuditor(xidorden: string): string;
+// Objetivo...: marcar la orden como auditada
+begin
+  if (BuscarReferencia(xidorden)) then result := cabref.FieldByName('obsauditor').AsString else result := '';
+end;
+
+
+procedure TTAuditoriaOnLine.MarcarOrdenTransferida(xlista: TStringList);
+// Objetivo...: marcar la orden como transferida
+var
+  i: integer;
+begin
+  for i := 1 to xlista.Count do begin
+    if (BuscarReferencia(xlista.Strings[i-1])) then begin
+      cabref.Edit;
+      cabref.FieldByName('transferida').AsString := 'S';
+      try
+        cabref.Post
+       except
+        cabref.Cancel
+      end;
+      datosdb.closeDB(cabref); cabref.Open;
+    end;
+  end;
+end;
+
+function TTAuditoriaOnLine.getObservacion(xidorden: string): string;
+// Objetivo...: marcar la orden como transferida
+begin
+  if (BuscarReferencia(xidorden)) then result := cabref.FieldByName('observacion').AsString else result := '';
+end;
+
+procedure TTAuditoriaOnLine.Exportar(xlista: TStringList);
+// Objetivo...: Exportar Ordenes
+var
+  i, j: integer;
+  cab, det: TextFile;
+  directorio, linea1, linea2: string;
+  l: TObjectList;
+  objeto: TTAuditoriaCCB;
+begin
+  directorio := dbs.DirSistema + '\auditoria\online\upload\';
+  AssignFile(cab, directorio + 'cab_auditoria_mod.txt');
+  AssignFile(det, directorio + 'det_auditoria_mod.txt');
+  rewrite(cab); rewrite(det);
+
+  for i := 1 to xlista.Count do begin
+    if (BuscarReferencia(xlista.Strings[i-1])) then begin
+      linea1 := utiles.StringLongitudFija(cabref.FieldByName('idonline').AsString, 32) + utiles.StringLongitudFija(cabref.FieldByName('auditada').AsString, 1) + '  ' + utiles.StrQuitarTodosLosCaracteresEspeciales(trimright(cabref.FieldByName('obsauditor').AsString));
+      WriteLn(cab, linea1);
+
+      auditoriacb.getDatos(cabref.FieldByName('nroauditoria').AsString);
+      l := auditoriacb.setOrdenes;
+      for j := 1 to l.Count do begin
+        objeto := TTAuditoriaCCB(l.Items[j-1]);
+        linea2 := utiles.StringLongitudFija(cabref.FieldByName('idonline').AsString, 32) + utiles.StringLongitudFija(objeto.Items, 4) + utiles.StringLongitudFija(objeto.Codigo, 7) + utiles.StringLongitudFija(FloatToStr(objeto.monto), 15) + utiles.StringLongitudFija(FloatToStr(objeto.monto_dif), 15) + utiles.StringLongitudFija(objeto.Estado, 1) +
+                  utiles.StringLongitudFija(cabref.FieldByName('efector').AsString, 7) + utiles.StringLongitudFija(cabref.FieldByName('fecha').AsString, 9) + utiles.StringLongitudFija(cabref.FieldByName('codos').AsString, 7) + utiles.StringLongitudFija(cabref.FieldByName('nrodoc').AsString, 17);
+        WriteLn(det, linea2);
+      end;
+      l.Free; l := nil;
+
+    end;
+  end;
+
+  closeFile(cab); closeFile(det);
+end;
+
+procedure TTAuditoriaOnLine.ListarControl(xdesde, xhasta: string; salida: char);
+var
+  existepadron: boolean;
+  codosanter, npac, auditada: string;
+  cant: integer;
+begin
+  list.IniciarTitulos;
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 14');
+  list.Titulo(0, 0, 'Control de Ordenes Online Transferidas Lapso: ' + xdesde + ' - ' + xhasta, 1, 'Arial, normal, 12');
+  list.Titulo(0, 0, 'Facturación a Obras Sociales', 1, 'Arial, negrita, 12');
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 5');
+  list.Titulo(0, 0, 'Nro.Orden Online', 1, 'Arial, cursiva, 8');
+  list.Titulo(28, list.Lineactual, 'Nro.Auditoría', 2, 'Arial, cursiva, 8');
+  list.Titulo(40, list.Lineactual, 'F.Audit.', 3, 'Arial, cursiva, 8');
+  list.Titulo(55, list.Lineactual, 'F.Pedido', 4, 'Arial, cursiva, 8');
+  list.Titulo(65, list.Lineactual, 'Obra Social', 5, 'Arial, cursiva, 8');
+  list.Titulo(90, list.Lineactual, 'Audit.', 6, 'Arial, cursiva, 8');
+  list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 5');
+
+  obsocial.conectar;
+  profesional.conectar;
+
+  codosanter := ''; cant := 0;
+
+  cabref.IndexFieldNames := 'FECHA';
+  datosdb.Filtrar(cabref, 'fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''');
+  cabref.First;
+  while not cabref.Eof do begin
+    npac := '';
+    if (cabref.FieldByName('codos').AsString <> codosanter) then begin
+      existepadron := padron.conectar(cabref.FieldByName('codos').AsString);
+    end;
+    codosanter := cabref.FieldByName('codos').AsString;
+
+    if (existepadron) then begin
+       if (padron.Buscar(cabref.FieldByName('codos').AsString, cabref.FieldByName('nrodoc').AsString)) then begin
+          padron.getDatos(cabref.FieldByName('codos').AsString, cabref.FieldByName('nrodoc').AsString);
+          npac := padron.Nombre;
+       end;
+    end;
+
+    obsocial.getDatos(cabref.FieldByName('codos').AsString);
+    profesional.getDatos(cabref.FieldByName('efector').AsString);
+    if (length(trim(cabref.FieldByName('auditada').AsString)) = 0) then auditada := 'N' else
+      auditada := cabref.FieldByName('auditada').AsString;
+
+    list.Linea(0, 0, cabref.FieldByName('idonline').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    list.Linea(28, list.Lineactual, cabref.FieldByName('nroauditoria').AsString, 2, 'Arial, normal, 8', salida, 'N');
+    list.Linea(40, list.Lineactual, utiles.sFormatoFecha(cabref.FieldByName('fecha').AsString), 3, 'Arial, normal, 8', salida, 'N');
+    list.Linea(55, list.Lineactual, utiles.sFormatoFecha(cabref.FieldByName('fepedido').AsString), 4, 'Arial, normal, 8', salida, 'N');
+    list.Linea(65, list.Lineactual, copy(obsocial.Nombre, 1, 20), 5, 'Arial, normal, 8', salida, 'N');
+    list.Linea(90, list.Lineactual, auditada, 6, 'Arial, normal, 8', salida, 'S');
+
+    list.Linea(0, 0, 'Efector: ' + profesional.nombre, 1, 'Arial, normal, 8', salida, 'N');
+    list.Linea(55, list.Lineactual, 'Paciente: ' + npac, 2, 'Arial, normal, 8', salida, 'S');
+
+    list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    Inc(cant);
+
+    cabref.Next;
+  end;
+  obsocial.desconectar;
+  profesional.desconectar;
+  datosdb.QuitarFiltro(cabref);
+
+  cabref.IndexFieldNames := 'IDONLINE';
+
+  if (length(trim(codosanter)) = 0) then utiles.msgError('No hay Datos para Listar ...!') else begin
+    list.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+    list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    list.Linea(0, 0, 'Cantidad de Ordenes Listadas: ' + inttostr(cant), 1, 'Arial, normal, 10', salida, 'S');
+    list.FinList;
+  end;
+end;
+
+procedure TTAuditoriaOnLine.ListarControlPorProfesional(xdesde, xhasta: string; salida: char);
+var
+  existepadron: boolean;
+  codosanter, npac, auditada, idprofanter: string;
+  cant: integer;
+
+  procedure ListCantidad(salida: char);
+  begin
+    if (cant > 0) then begin
+      list.Linea(0, 0, 'Cantidad de Ordenes Listadas: ' + inttostr(cant), 1, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, negrita, 5', salida, 'S');
+      cant := 0;
+    end;
+  end;
+
+begin
+  list.IniciarTitulos;
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 14');
+  list.Titulo(0, 0, 'Control de Ordenes Online Trans. por Profesional Lapso: ' + xdesde + ' - ' + xhasta, 1, 'Arial, normal, 12');
+  list.Titulo(0, 0, 'Facturación a Obras Sociales', 1, 'Arial, negrita, 12');
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 5');
+  list.Titulo(0, 0, 'Nro.Orden Online', 1, 'Arial, cursiva, 8');
+  list.Titulo(28, list.Lineactual, 'Nro.Auditoría', 2, 'Arial, cursiva, 8');
+  list.Titulo(40, list.Lineactual, 'F.Audit.', 3, 'Arial, cursiva, 8');
+  list.Titulo(55, list.Lineactual, 'F.Pedido', 4, 'Arial, cursiva, 8');
+  list.Titulo(65, list.Lineactual, 'Obra Social', 5, 'Arial, cursiva, 8');
+  list.Titulo(90, list.Lineactual, 'Audit.', 6, 'Arial, cursiva, 8');
+  list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 5');
+
+  obsocial.conectar;
+  profesional.conectar;
+
+  codosanter := ''; cant := 0; idprofanter := '';
+
+  cabref.IndexFieldNames := 'EFECTOR;FECHA';
+  datosdb.Filtrar(cabref, 'fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''');
+  cabref.First;
+  while not cabref.Eof do begin
+    npac := '';
+    if (cabref.FieldByName('codos').AsString <> codosanter) then begin
+      existepadron := padron.conectar(cabref.FieldByName('codos').AsString);
+    end;
+    codosanter := cabref.FieldByName('codos').AsString;
+
+    if (existepadron) then begin
+       if (padron.Buscar(cabref.FieldByName('codos').AsString, cabref.FieldByName('nrodoc').AsString)) then begin
+          padron.getDatos(cabref.FieldByName('codos').AsString, cabref.FieldByName('nrodoc').AsString);
+          npac := padron.Nombre;
+       end;
+    end;
+
+    obsocial.getDatos(cabref.FieldByName('codos').AsString);
+
+    if (cabref.FieldByName('efector').AsString <> idprofanter) then begin
+      profesional.getDatos(cabref.FieldByName('efector').AsString);
+      idprofanter := cabref.FieldByName('efector').AsString;
+
+      ListCantidad(salida);
+      list.Linea(0, 0, 'Efector: ' + profesional.nombre, 1, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, negrita, 5', salida, 'S');
+    end;
+
+    if (length(trim(cabref.FieldByName('auditada').AsString)) = 0) then auditada := 'N' else
+      auditada := cabref.FieldByName('auditada').AsString;
+
+    list.Linea(0, 0, cabref.FieldByName('idonline').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    list.Linea(28, list.Lineactual, cabref.FieldByName('nroauditoria').AsString, 2, 'Arial, normal, 8', salida, 'N');
+    list.Linea(40, list.Lineactual, utiles.sFormatoFecha(cabref.FieldByName('fecha').AsString), 3, 'Arial, normal, 8', salida, 'N');
+    list.Linea(55, list.Lineactual, utiles.sFormatoFecha(cabref.FieldByName('fepedido').AsString), 4, 'Arial, normal, 8', salida, 'N');
+    list.Linea(65, list.Lineactual, copy(obsocial.Nombre, 1, 20), 5, 'Arial, normal, 8', salida, 'N');
+    list.Linea(90, list.Lineactual, auditada, 6, 'Arial, normal, 8', salida, 'S');
+
+    list.Linea(0, 0, 'Paciente: ' + npac, 2, 'Arial, normal, 8', salida, 'S');
+
+    list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    Inc(cant);
+
+    cabref.Next;
+  end;
+
+  ListCantidad(salida);
+
+  obsocial.desconectar;
+  profesional.desconectar;
+  datosdb.QuitarFiltro(cabref);
+
+  cabref.IndexFieldNames := 'IDONLINE';
+
+  if (length(trim(codosanter)) = 0) then utiles.msgError('No hay Datos para Listar ...!') else begin
+    list.FinList;
+  end;
+end;
+
+procedure TTAuditoriaOnLine.AjustarEstados(xdesde: string);
+// Objetivo...: Ajustar estados en ordenes
+begin
+  datosdb.Filtrar(cabref, 'fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''');
+  cabref.First;
+  while not cabref.eof do begin
+    auditoriacb.AjustarEstado(cabref.FieldByName('nroauditoria').AsString, cabref.FieldByName('anulada').AsString);
+    cabref.Next;
+  end;
+  datosdb.QuitarFiltro(cabref);
+end;
+
+function TTAuditoriaOnLine.getOrdenes(xdesde, xhasta, xidprof: string): TQuery;
+begin
+  result := datosdb.tranSQL(cabref.DatabaseName, 'select idonline, nroauditoria, efector, fecha, codos, nrodoc from ' + cabref.TableName +
+                            ' where fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''' +
+                            ' and efector = ' + '''' + xidprof + '''' + ' and anulada <> ' + '''' +  'S' + '''' + ' order by fecha');
+end;
+
+procedure TTAuditoriaOnLine.ChequearReferencias;
+// Objetivo...: actualizar las referencias para poder facturar en otros laboratorios
+begin
+  cabref.First;
+  while not cabref.eof do begin
+    cabref.Edit;
+    cabref.FieldByName('referencia').AsString := trim(copy(cabref.FieldByName('idonline').AsString, 7, 25));
+    try
+      cabref.Post
+    finally
+      cabref.Cancel
+    end;
+    cabref.Next;
+  end;
+end;
+
+procedure TTAuditoriaOnLine.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not cabref.Active then cabref.Open;
+  end;
+  Inc(conexiones);
+
+  {ffirebird := TTFirebird.Create;
+  ffirebird.getModulo('auditoria');
+
+  ffirebird.Conectar(ffirebird.Host + 'auditoria.gdb', ffirebird.Usuario, ffirebird.Password);}
+end;
+
+procedure TTAuditoriaOnLine.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(cabref);
+  end;
+end;
+
+{===============================================================================}
+
+function auditonline: TTAuditoriaOnLine;
+begin
+  if xauditoriaonline = nil then
+    xauditoriaonline := TTAuditoriaOnLine.Create;
+  Result := xauditoriaonline;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xauditoriaonline.Free;
+
+end.

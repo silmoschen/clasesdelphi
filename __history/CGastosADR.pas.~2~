@@ -1,0 +1,771 @@
+unit CGastosADR;
+
+interface
+
+uses CBDT, SysUtils, DBTables, CUtiles, CListar, CIDBFM, Classes, CPlanctasAsociacion, CProveedorADR,
+     CBancos, CLogSeg, CUsuario, CServers2000_Excel;
+
+type
+
+TTGastosADR = class
+  Codcta, Idregistro, Fecha, Comprobante, Codprov, Concepto: String; Monto, Efectivo, Cheque, TotalEfectivo, TotalCheques: Real;
+  gasto, distgastos, gastosbco, ctasctesbcos, transgastos: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xcodcta, xidregistro, xitems: String): Boolean;
+  procedure   Registrar(xcodcta, xidregistro, xitems, xfecha, xfechacheque, xcomprobante, xcodprov, xconcepto: String; xmonto: Real);
+  procedure   Borrar(xcodcta, xidregistro, xitems: String);
+  procedure   getDatos(xcodcta, xidregistro, xitems: String);
+  function    setItems(xcodcta, xfecha: String): TStringList;
+  procedure   obtenerTotalEfectivoCheque(xcodcta, xidregistro: String);
+
+  function    BuscarDist(xcodcta, xidregistro: String): Boolean;
+  procedure   RegistrarDist(xcodcta, xidregistro, xfecha: String; xefectivo, xcheque: Real);
+  procedure   BorrarDist(xcodcta, xidregistro: String);
+
+  procedure   CalcularTotalEfectivo_Cheques(xfecha: String);
+
+  procedure   ListarDetalleDeGastos(listcuentas: TStringList; xdfecha, xhfecha: String; xrecep, xpercep: Boolean; salida: char);
+  procedure   ListarResumenDeGastos(listcuentas: TStringList; xdfecha, xhfecha: String; xrecep, xpercep: Boolean; salida: char);
+
+  function    BuscarGastoBanco(xcodcta, xidregistro, xitems: String): Boolean;
+  procedure   RegistrarGastoBanco(xcodcta, xidregistro, xitems, xnrocheque, xfecha, xconcepto, xcodbco: String; xmonto: Real; xcantitems: Integer);
+  procedure   BorrarItemsGasto(xcodcta, xidregistro: String);
+  function    setCheques(xcodcta, xidregistro: String): TStringList;
+
+  procedure   BorrarCuentasBancarias;
+  procedure   RegistrarCuentaBancaria(xcodcta, xcuenta: String);
+  function    setCuentasBancarias: TStringList;
+  function    BuscarCuenta(xcodcta: String): Boolean;
+  function    setCuenta(xcodcta: String): String;
+
+  procedure   RegistrarTrans(xperiodo, xtrans: string);
+  function    getNuevaTrans(xperiodo: string): string;
+
+  procedure   SincronizarFechas;
+  procedure   SincronizarFechasEfectivo;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  idanter: array[1.. 1] of String;
+  totales: array[1..5] of Real;
+  c1: Integer;
+  f1: String;
+  procedure TotalCuenta(salida: char);
+  procedure ListarMontoCuenta(salida: char);
+end;
+
+function gastoasoc: TTGastosADR;
+
+implementation
+
+var
+  xgastoasoc: TTGastosADR = nil;
+
+constructor TTGastosADR.Create;
+begin
+  gasto        := datosdb.openDB('gastos', '');
+  distgastos   := datosdb.openDB('distgastos', '');
+  gastosbco    := datosdb.openDB('gastosBanco', '');
+  ctasctesbcos := datosdb.openDB('ctasctesbancarias', '', '', planctas.path);
+  transgastos  := datosdb.openDB('transgastos', '');
+end;
+
+destructor TTGastosADR.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function   TTGastosADR.Buscar(xcodcta, xidregistro, xitems: String): Boolean;
+// Objetivo...: Buscar una instancia
+Begin
+  Result := datosdb.Buscar(gasto, 'codcta', 'idregistro', 'items', xcodcta, xidregistro, xitems);
+end;
+
+procedure  TTGastosADR.Registrar(xcodcta, xidregistro, xitems, xfecha, xfechacheque, xcomprobante, xcodprov, xconcepto: String; xmonto: Real);
+// Objetivo...: Registrar una instancia
+Begin
+  if Length(Trim(xidregistro)) = 0 then Begin
+    repeat
+      Idregistro := utiles.setIdRegistroFecha;
+    until not Buscar(xcodcta, Idregistro, '01');
+  end else
+    Idregistro := xidregistro;
+
+  if Buscar(xcodcta, Idregistro, xitems) then gasto.Edit else gasto.Append;
+  gasto.FieldByName('codcta').AsString      := xcodcta;
+  gasto.FieldByName('idregistro').AsString  := Idregistro;
+  gasto.FieldByName('items').AsString       := xitems;
+  gasto.FieldByName('fecha').AsString       := utiles.sExprFecha2000(xfecha);
+  if Length(Trim(xfechacheque)) > 0 then
+    gasto.FieldByName('fechach').AsString     := utiles.sExprFecha2000(xfechacheque)
+   else
+    gasto.FieldByName('fechach').AsString     := utiles.sExprFecha2000(xfecha);
+  gasto.FieldByName('comprobante').AsString := xcomprobante;
+  gasto.FieldByName('codprov').AsString     := xcodprov;
+  gasto.FieldByName('concepto').AsString    := xconcepto;
+  gasto.FieldByName('monto').AsFloat        := xmonto;
+  try
+    gasto.Post
+   except
+    gasto.Cancel
+  end;
+  datosdb.closeDB(gasto); gasto.Open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Registrando Gasto ' + xcodcta + '-' + xidregistro);
+end;
+
+procedure  TTGastosADR.Borrar(xcodcta, xidregistro, xitems: String);
+// Objetivo...: Borrar una instancia
+Begin
+  if Buscar(xcodcta, xidregistro, xitems) then gasto.Delete;
+  datosdb.closeDB(gasto); gasto.Open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Borrando Gasto ' + xcodcta + '-' + xidregistro);
+end;
+
+procedure  TTGastosADR.getDatos(xcodcta, xidregistro, xitems: String);
+// Objetivo...: Recuperar una instancia
+Begin
+  if Buscar(xcodcta, Idregistro, xitems) then Begin
+    codcta      := gasto.FieldByName('codcta').AsString;
+    idregistro  := gasto.FieldByName('idregistro').AsString;
+    comprobante := gasto.FieldByName('comprobante').AsString;
+    codprov     := gasto.FieldByName('codprov').AsString;
+    concepto    := gasto.FieldByName('concepto').AsString;
+    monto       := gasto.FieldByName('monto').AsFloat;
+  end else Begin
+    codcta := ''; idregistro := ''; comprobante := ''; codprov := ''; concepto := ''; monto := 0;
+  end;
+end;
+
+function  TTGastosADR.setItems(xcodcta, xfecha: String): TStringList;
+// Objetivo...: Retornar Lista de Gastos
+var
+  l: TStringList;
+  f1, f2: String;
+Begin
+  l := TStringList.Create;
+  f1 := '01' + Copy(xfecha, 3, 6);
+  f2 := utiles.ultimodiames(Copy(xfecha, 4, 2), Copy(utiles.sExprFecha2000(xfecha), 1, 4)) + Copy(xfecha, 3, 6);
+  datosdb.Filtrar(gasto, 'codcta = ' + '''' + xcodcta + '''' + ' and fecha >= ' + '''' + utiles.sExprFecha2000(f1) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(f2) + '''');
+  gasto.First;
+  while not gasto.Eof do Begin
+    l.Add(gasto.FieldByName('fecha').AsString + gasto.FieldByName('idregistro').AsString + '0;' + gasto.FieldByName('codprov').AsString + gasto.FieldByName('comprobante').AsString + '1;' + gasto.FieldByName('concepto').AsString + '2;' + gasto.FieldByName('monto').AsString + '3;' + gasto.FieldByName('items').AsString);
+    gasto.Next;
+  end;
+  datosdb.QuitarFiltro(gasto);
+
+  Result := l;
+end;
+
+procedure  TTGastosADR.obtenerTotalEfectivoCheque(xcodcta, xidregistro: String);
+// Objetivo...: Obtener total efectivo/chques
+Begin
+  if BuscarDist(xcodcta, xidregistro) then Begin
+    Efectivo := distgastos.FieldByName('efectivo').AsFloat;
+    Cheque   := distgastos.FieldByName('cheque').AsFloat;
+  end else Begin
+    Efectivo := 0; Cheque := 0;
+  end;
+end;
+
+function  TTGastosADR.BuscarDist(xcodcta, xidregistro: String): Boolean;
+// Objetivo...: Buscar Distribución
+Begin
+  Result := datosdb.Buscar(distgastos, 'codcta', 'idregistro', xcodcta, xidregistro);
+end;
+
+procedure TTGastosADR.RegistrarDist(xcodcta, xidregistro, xfecha: String; xefectivo, xcheque: Real);
+// Objetivo...: Registrar Distribución
+var
+  xid: String;
+Begin
+  if length(Trim(xidregistro)) = 0 then xid := Idregistro else xid := xidregistro;
+  if BuscarDist(xcodcta, xid) then distgastos.Edit else distgastos.Append;
+  distgastos.FieldByName('codcta').AsString     := xcodcta;
+  distgastos.FieldByName('idregistro').AsString := xid;
+  distgastos.FieldByName('fecha').AsString      := utiles.sExprFecha2000(xfecha);
+  distgastos.FieldByName('efectivo').AsFloat    := xefectivo;
+  distgastos.FieldByName('cheque').AsFloat      := xcheque;
+  try
+    distgastos.Post
+   except
+    distgastos.Cancel
+  end;
+  datosdb.closedb(distgastos); distgastos.Open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Registrando Distribución Gasto ' + xcodcta + '-' + xidregistro);
+end;
+
+procedure TTGastosADR.BorrarDist(xcodcta, xidregistro: String);
+// Objetivo...: borrar tablas de persistencia
+begin
+  if BuscarDist(xcodcta, Idregistro) then Begin
+    distgastos.Delete;
+    datosdb.closedb(distgastos); distgastos.Open;
+  End;
+  BorrarItemsGasto(xcodcta, xidregistro);
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Borrando Distribución Gasto ' + xcodcta + '-' + xidregistro);
+end;
+
+procedure TTGastosADR.CalcularTotalEfectivo_Cheques(xfecha: String);
+// Objetivo...: Calcular total de efectivo y cheques
+var
+  f1, f2: String;
+Begin
+  f1 := '01' + Copy(xfecha, 3, 6);
+  f2 := utiles.ultimodiames(Copy(xfecha, 4, 2), Copy(utiles.sExprFecha2000(xfecha), 1, 4)) + Copy(xfecha, 3, 6);
+  datosdb.Filtrar(distgastos, 'fecha >= ' + '''' + f1 + '''' + ' and fecha <= ' + '''' + f2 + '''');
+  distgastos.First; totalEfectivo := 0; totalCheques := 0;
+  while not distgastos.Eof do Begin
+    totalEfectivo := totalEfectivo + distgastos.FieldByName('efectivo').AsFloat;
+    totalCheques  := totalCheques  + distgastos.FieldByName('cheque').AsFloat;
+    distgastos.Next;
+  end;
+  datosdb.QuitarFiltro(distgastos);
+end;
+
+procedure TTGastosADR.ListarDetalleDeGastos(listcuentas: TStringList; xdfecha, xhfecha: String; xrecep, xpercep: Boolean; salida: char);
+// Objetivo...: Listar Detalle de Gastos
+var
+  rsql: TQuery;
+  l1, l2, listar: Boolean;
+Begin
+  if (salida = 'P') or (salida = 'I') then Begin
+    list.Setear(salida);
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+    if xrecep then List.Titulo(0, 0, ' Detalle de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha Recepción)', 1, 'Arial, negrita, 14') else
+      List.Titulo(0, 0, ' Detalle de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha de Pago)', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, 'Fecha', 1, 'Arial, cursiva, 8');
+    List.Titulo(10, list.Lineactual, 'Comprobante', 2, 'Arial, cursiva, 8');
+    List.Titulo(22, list.Lineactual, 'Proveedor', 3, 'Arial, cursiva, 8');
+    List.Titulo(47, list.Lineactual, 'Concepto', 4, 'Arial, cursiva, 8');
+    List.Titulo(77, list.Lineactual, 'Efectivo', 5, 'Arial, cursiva, 8');
+    List.Titulo(86, list.Lineactual, 'Cheque', 6, 'Arial, cursiva, 8');
+    List.Titulo(93, list.Lineactual, 'Nro.Trans', 7, 'Arial, cursiva, 8');
+    list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  end;
+  if salida = 'X' then Begin
+    c1 := 0;
+    Inc(c1); f1 := Trim(IntToStr(c1));
+     if xrecep then excel.setString('a' + f1, 'a' + f1, 'Detalle de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha Recepción)', 'Arial, negrita, 14') else
+       excel.setString('a' + f1, 'a' + f1, 'Detalle de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha Pago)', 'Arial, negrita, 14');
+    Inc(c1); f1 := Trim(IntToStr(c1));
+    excel.setString('a' + f1, 'a' + f1, 'Fecha', 'Arial, negrita, 8');
+    excel.setString('b' + f1, 'b' + f1, 'Comprobante', 'Arial, negrita, 8');
+    excel.setString('c' + f1, 'c' + f1, 'Proveedor', 'Arial, negrita, 8');
+    excel.setString('d' + f1, 'd' + f1, 'Concepto', 'Arial, negrita, 8');
+    excel.setString('e' + f1, 'e' + f1, 'Efectivo', 'Arial, negrita, 8');
+    excel.setString('f' + f1, 'f' + f1, 'Cheque', 'Arial, negrita, 8');
+    excel.setString('g' + f1, 'g' + f1, 'Nro.Trans.', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna( 'c1', 'c1', 25);
+    excel.FijarAnchoColumna( 'd1', 'd1', 25);
+  end;
+
+  if xrecep then
+    rsql := datosdb.tranSQL('select * from gastos where fecha >= ' + '''' + utiles.sExprFecha2000(xdfecha) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhfecha) + '''' +
+                            ' order by codcta, fecha');
+
+  if xpercep then Begin
+    rsql  := datosdb.tranSQL('select * from gastos where fechach >= ' + '''' + utiles.sExprFecha2000(xdfecha) + '''' + ' and fechach <= ' + '''' + utiles.sExprFecha2000(xhfecha) + '''' +
+                             ' order by codcta, fechach');
+  end;
+
+  rsql.Open;
+  idanter[1] := ''; totales[1] := 0; totales[2] := 0; totales[3] := 0; totales[4] := 0;
+  while not rsql.Eof do Begin
+    if utiles.verificarItemsLista(listcuentas, rsql.FieldByName('codcta').AsString) then Begin
+
+     listar := True;
+
+     if xpercep then Begin
+       if BuscarDist(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString) then Begin
+         if distgastos.FieldByName('cheque').AsFloat > 0 then Begin
+           if xpercep then Begin
+             if BuscarGastoBanco(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString, '01') then
+               if (gastosbco.FieldByName('fecha').AsString >= utiles.sExprFecha2000(xdfecha)) and (gastosbco.FieldByName('fecha').AsString <= utiles.sExprFecha2000(xhfecha)) then listar := True else listar := False;
+           end;
+         end;
+       end;
+     end;
+
+     if listar then Begin
+      if (Copy(rsql.FieldByName('codcta').AsString, 1, 1) = '1') and not (l1) then Begin
+        if (salida = 'P') or (salida = 'I') then Begin
+          list.Linea(0, 0, '*** Cuentas de Activo ***', 1, 'Arial, normal, 12', salida, 'S');
+          list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'S');
+        end;
+        if salida = 'X' then Begin
+          Inc(c1); f1 := Trim(IntToStr(c1));
+          excel.setString('a' + f1, 'a' + f1, '*** Cuentas de Activo ***', 'Arial, normal, 12');
+        end;
+        l1 := True;
+      end;
+      if (Copy(rsql.FieldByName('codcta').AsString, 1, 1) > '1') and not (l2) then Begin
+        if (salida = 'P') or (salida = 'I') then Begin
+        if l1 then list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'S');
+          list.Linea(0, 0, '*** Cuentas de Egresos ***', 1, 'Arial, normal, 12', salida, 'S');
+          list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'S');
+        end;
+        if salida = 'X' then Begin
+          Inc(c1); f1 := Trim(IntToStr(c1));
+          excel.setString('a' + f1, 'a' + f1, '*** Cuentas de Egresos ***', 'Arial, normal, 12');
+        end;
+        l2 := True;
+      end;
+      if rsql.FieldByName('codcta').AsString <> idanter[1] then Begin
+        TotalCuenta(salida);
+        planctas.getDatos(rsql.FieldByName('codcta').AsString);
+        if (salida = 'P') or (salida = 'I') then Begin
+          List.Linea(0, 0, 'Cuenta: ' + rsql.FieldByName('codcta').AsString + '  ' + planctas.cuenta, 1, 'Arial, negrita, 8', salida, 'S');
+          List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+        end;
+        idanter[1] := rsql.FieldByName('codcta').AsString;
+      end;
+      proveedor.getDatos(rsql.FieldByName('codprov').AsString);
+      if (salida = 'P') or (salida = 'I') then Begin
+        list.Linea(0, 0, '   ' + utiles.sFormatoFecha(rsql.FieldByName('fecha').AsString), 1, 'Arial, normal, 8', salida, 'N');
+        list.Linea(9, list.Lineactual, rsql.FieldByName('comprobante').AsString, 2, 'Arial, normal, 8', salida, 'N');
+        list.Linea(22, list.Lineactual, Copy(proveedor.nombre, 1, 30), 3, 'Arial, normal, 8', salida, 'N');
+        list.Linea(47, list.Lineactual, Copy(rsql.FieldByName('concepto').AsString, 1, 45), 4, 'Arial, normal, 8', salida, 'N');
+        BuscarDist(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString);
+        list.importe(82, list.Lineactual, '', distgastos.FieldByName('efectivo').AsFloat, 5, 'Arial, normal, 8');
+        list.importe(92, list.Lineactual, '', distgastos.FieldByName('cheque').AsFloat, 6, 'Arial, normal, 8');
+        list.Linea(93, list.Lineactual, copy(rsql.FieldByName('idregistro').AsString, 7, 9), 7, 'Arial, normal, 8', salida, 'S');
+        if BuscarGastoBanco(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString, '01') then Begin
+          while not gastosbco.Eof do Begin
+            if rsql.FieldByName('idregistro').AsString <> gastosbco.FieldByName('idregistro').AsString then Break;
+            list.Linea(0, 0, '', 1, 'Arial, normal, 7', salida, 'S');
+            list.Linea(9, list.Lineactual, utiles.sFormatoFecha(gastosbco.FieldByName('fecha').AsString), 2, 'Arial, normal, 7', salida, 'S');
+            list.Linea(15, list.Lineactual, gastosbco.FieldByName('nrocheque').AsString, 3, 'Arial, normal, 7', salida, 'S');
+            list.Linea(24, list.Lineactual, gastosbco.FieldByName('codbco').AsString, 4, 'Arial, normal, 7', salida, 'S');
+            list.Linea(35, list.Lineactual, setCuenta(gastosbco.FieldByName('codbco').AsString), 5, 'Arial, normal, 7', salida, 'S');
+            list.importe(92, list.Lineactual, '', gastosbco.FieldByName('monto').AsFloat, 6, 'Arial, normal, 8');
+            list.Linea(96, list.Lineactual, '', 7, 'Arial, normal, 7', salida, 'S');
+            gastosbco.Next;
+          end;
+        end;
+      end;
+
+      if (salida = 'X') then Begin
+        Inc(c1); f1 := Trim(IntToStr(c1));
+        excel.setString('a' + f1, 'a' + f1, utiles.sFormatoFecha(rsql.FieldByName('fecha').AsString), 'Arial, normal, 8');
+        excel.setString('b' + f1, 'b' + f1, '''' + rsql.FieldByName('comprobante').AsString, 'Arial, normal, 8');
+        excel.setString('c' + f1, 'c' + f1, Copy(proveedor.nombre, 1, 30), 'Arial, normal, 8');
+        excel.setString('d' + f1, 'd' + f1, Copy(rsql.FieldByName('concepto').AsString, 1, 45), 'Arial, normal, 8');
+        BuscarDist(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString);
+        excel.setReal('e' + f1, 'e' + f1, distgastos.FieldByName('efectivo').AsFloat, 'Arial, normal, 8');
+        excel.setReal('f' + f1, 'f' + f1, distgastos.FieldByName('cheque').AsFloat, 'Arial, normal, 8');
+        excel.setString('g' + f1, 'g' + f1, Copy(rsql.FieldByName('idregistro').AsString, 7, 9), 'Arial, normal, 8');
+        if BuscarGastoBanco(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString, '01') then Begin
+          while not gastosbco.Eof do Begin
+            if rsql.FieldByName('idregistro').AsString <> gastosbco.FieldByName('idregistro').AsString then Break;
+            Inc(c1); f1 := Trim(IntToStr(c1));
+            excel.setString('a' + f1, 'a' + f1, utiles.sFormatoFecha(gastosbco.FieldByName('fecha').AsString), 'Arial, cursiva, 8');
+            excel.setString('b' + f1, 'b' + f1, gastosbco.FieldByName('nrocheque').AsString, 'Arial, cursiva, 8');
+            excel.setString('c' + f1, 'c' + f1, gastosbco.FieldByName('codbco').AsString, 'Arial, cursiva, 8');
+            excel.setString('d' + f1, 'd' + f1, setCuenta(gastosbco.FieldByName('codbco').AsString), 'Arial, cursiva, 8');
+            excel.setReal('e' + f1, 'e' + f1, gastosbco.FieldByName('monto').AsFloat, 'Arial, cursiva, 8');
+            gastosbco.Next;
+          end;
+        end;
+      end;
+
+      totales[1] := totales[1] + distgastos.FieldByName('efectivo').AsFloat;
+      totales[2] := totales[2] + distgastos.FieldByName('cheque').AsFloat;
+     end;
+    end;
+    rsql.Next;
+  end;
+  TotalCuenta(salida);
+  rsql.Close; rsql.Free;
+
+  //----------------------------------------------------------------------------
+
+  if totales[3] + totales[4] > 0 then Begin
+    if (salida = 'P') or (salida = 'I') then Begin
+      list.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+      list.Linea(0, 0, 'Total General:' , 1, 'Arial, negrita, 9', salida, 'N');
+      list.importe(82, list.Lineactual, '', totales[3], 2, 'Arial, negrita, 9');
+      list.importe(96, list.Lineactual, '', totales[4], 3, 'Arial, negrita, 9');
+      list.Linea(96, list.Lineactual, '', 4, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    end;
+    if salida = 'X' then Begin
+      Inc(c1); f1 := Trim(IntToStr(c1));
+      excel.setString('a' + f1, 'a' + f1, 'Total General', 'Arial, negrita, 9');
+      excel.setReal('e' + f1, 'e' + f1, totales[3], 'Arial, negrita, 9');
+      excel.setReal('f' + f1, 'f' + f1, totales[4], 'Arial, negrita, 9');
+      excel.setString('g2', 'g2', '', 'Arial, negrita, 8');
+    end;
+  end;
+
+  if (salida = 'P') or (salida = 'I') then
+    if Length(Trim(idanter[1])) = 0 then list.Linea(0, 0, idanter[1], 1, 'Arial, normal, 8', salida, 'S');
+
+  if (salida = 'P') or (salida = 'I') then List.FinList;
+  if salida = 'X' then excel.Visulizar;
+end;
+
+procedure TTGastosADR.TotalCuenta(salida: char);
+// Objetivo...: Listar total Cuenta
+Begin
+  if totales[1] + totales[2] > 0 then Begin
+    if (salida = 'P') or (salida = 'I') then Begin
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+      list.Linea(0, 0, 'Total Cuenta ' + planctas.cuenta + ':', 1, 'Arial, negrita, 8', salida, 'N');
+      list.importe(82, list.Lineactual, '', totales[1], 2, 'Arial, negrita, 8');
+      list.importe(95, list.Lineactual, '', totales[2], 3, 'Arial, negrita, 8');
+      list.Linea(96, list.Lineactual, '', 4, 'Arial, negrita, 8', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    end;
+    if salida = 'X' then Begin
+      Inc(c1); f1 := Trim(IntToStr(c1));
+      excel.setString('a' + f1, 'a' + f1, 'Total Cuenta ' + planctas.cuenta, 'Arial, negrita, 8');
+      excel.setReal('e' + f1, 'e' + f1, totales[1], 'Arial, negrita, 8');
+      excel.setReal('f' + f1, 'f' + f1, totales[2], 'Arial, negrita, 8');
+    end;
+  end;
+  totales[3] := totales[3] + totales[1];
+  totales[4] := totales[4] + totales[2];
+  totales[1] := 0; totales[2] := 0;
+end;
+
+procedure TTGastosADR.ListarResumenDeGastos(listcuentas: TStringList; xdfecha, xhfecha: String; xrecep, xpercep: Boolean; salida: char);
+// Objetivo...: Listar Resumen de Gastos
+var
+  rsql: TQuery;
+Begin
+  if (salida = 'P') or (salida = 'I') then Begin
+    list.Setear(salida);
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' Resumen de Egresos - Perdiodo: ' + xdfecha + ' - ' + xhfecha, 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, '     Cuenta', 1, 'Arial, cursiva, 8');
+    List.Titulo(77, list.Lineactual, 'Efectivo', 5, 'Arial, cursiva, 8');
+    List.Titulo(89, list.Lineactual, 'Cheque', 6, 'Arial, cursiva, 8');
+    list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  end;
+  if salida = 'X' then Begin
+    c1 := 0;
+    Inc(c1); f1 := Trim(IntToStr(c1));
+     if xrecep then excel.setString('a' + f1, 'a' + f1, 'Resumen de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha Recepción)', 'Arial, negrita, 14') else
+       excel.setString('a' + f1, 'a' + f1, 'Resumen de Egresos - Período: ' + xdfecha + ' - ' + xhfecha + ' (Fecha Pago)', 'Arial, negrita, 14');
+    Inc(c1); f1 := Trim(IntToStr(c1));
+    excel.setString('a' + f1, 'a' + f1, 'Código', 'Arial, negrita, 8');
+    excel.setString('b' + f1, 'b' + f1, 'Cuenta', 'Arial, negrita, 8');
+    excel.setString('c' + f1, 'c' + f1, 'Efectivo', 'Arial, negrita, 8');
+    excel.setString('d' + f1, 'd' + f1, 'Cheque', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna( 'b1', 'b1', 35);
+  end;
+
+  if xrecep then
+    rsql := datosdb.tranSQL('select * from gastos where fecha >= ' + '''' + utiles.sExprFecha2000(xdfecha) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhfecha) + '''' +
+                            ' order by codcta, fecha');
+
+  if xpercep then Begin
+    rsql  := datosdb.tranSQL('select * from gastos where fechach >= ' + '''' + utiles.sExprFecha2000(xdfecha) + '''' + ' and fechach <= ' + '''' + utiles.sExprFecha2000(xhfecha) + '''' +
+                             ' order by codcta, fechach');
+  end;
+
+  rsql.Open;
+  idanter[1] := ''; totales[1] := 0; totales[2] := 0; totales[3] := 0; totales[4] := 0;
+  while not rsql.Eof do Begin
+    if utiles.verificarItemsLista(listcuentas, rsql.FieldByName('codcta').AsString) then Begin
+      if rsql.FieldByName('codcta').AsString <> idanter[1] then Begin
+        ListarMontoCuenta(salida);
+        idanter[1] := rsql.FieldByName('codcta').AsString;
+      end;
+      BuscarDist(rsql.FieldByName('codcta').AsString, rsql.FieldByName('idregistro').AsString);
+      totales[1] := totales[1] + distgastos.FieldByName('efectivo').AsFloat;
+      totales[2] := totales[2] + distgastos.FieldByName('cheque').AsFloat;
+    end;
+    rsql.Next;
+  end;
+  ListarMontoCuenta(salida);
+
+  if totales[3] + totales[4] > 0 then Begin
+    if (salida = 'P') or (salida = 'I') then Begin
+      list.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+      list.Linea(0, 0, 'Total General:' , 1, 'Arial, negrita, 9', salida, 'N');
+      list.importe(82, list.Lineactual, '', totales[3], 2, 'Arial, negrita, 9');
+      list.importe(95, list.Lineactual, '', totales[4], 3, 'Arial, negrita, 9');
+      list.Linea(96, list.Lineactual, '', 4, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    end;
+    if salida = 'X' then Begin
+      Inc(c1); f1 := Trim(IntToStr(c1));
+      excel.setString('a' + f1, 'a' + f1, 'Total General', 'Arial, negrita, 9');
+      excel.setReal('c' + f1, 'c' + f1, totales[3], 'Arial, negrita, 9');
+      excel.setReal('d' + f1, 'd' + f1, totales[4], 'Arial, negrita, 9');
+      excel.setString('e2', 'e2', '', 'Arial, negrita, 9');
+    end;
+  end;
+  if (salida = 'P') or (salida = 'I') then
+    if Length(Trim(idanter[1])) = 0 then list.Linea(0, 0, idanter[1], 1, 'Arial, normal, 8', salida, 'S');
+
+  if (salida = 'P') or (salida = 'I') then List.FinList;
+  if salida = 'X' then excel.Visulizar;
+end;
+
+procedure TTGastosADR.ListarMontoCuenta(salida: char);
+// Objetivo...: Listar Monto Cuenta
+Begin
+  if totales[1] + totales[2] > 0 then Begin
+    planctas.getDatos(idanter[1]);
+    if (salida = 'P') or (salida = 'I') then Begin
+      list.Linea(0, 0, idanter[1] + '   ' + planctas.cuenta, 1, 'Arial, normal, 8', salida, 'N');
+      list.importe(82, list.Lineactual, '', totales[1], 2, 'Arial, normal, 8');
+      list.importe(95, list.Lineactual, '', totales[2], 3, 'Arial, normal, 8');
+      list.Linea(96, list.Lineactual, '', 4, 'Arial, normal, 8', salida, 'S');
+    end;
+    if salida = 'X' then Begin
+      Inc(c1); f1 := Trim(IntToStr(c1));
+      excel.setString('a' + f1, 'a' + f1, idanter[1], 'Arial, normal, 8');
+      excel.setString('b' + f1, 'b' + f1, planctas.cuenta, 'Arial, normal, 8');
+      excel.setReal('c' + f1, 'c' + f1, totales[1], 'Arial, normal, 8');
+      excel.setReal('d' + f1, 'd' + f1, totales[2], 'Arial, normal, 8');
+    end;
+  end;
+  totales[3] := totales[3] + totales[1];
+  totales[4] := totales[4] + totales[2];
+  totales[1] := 0; totales[2] := 0;
+end;
+
+function  TTGastosADR.BuscarGastoBanco(xcodcta, xidregistro, xitems: String): Boolean;
+// Objetivo...: Buscar gasto bancario
+Begin
+  Idregistro := xidregistro;
+  if gastosbco.IndexFieldNames <> 'codcta;idregistro;items' then gastosbco.IndexFieldNames := 'codcta;idregistro;items';
+  Result := datosdb.Buscar(gastosbco, 'codcta', 'idregistro', 'items', xcodcta, xidregistro, xitems);
+end;
+
+procedure TTGastosADR.RegistrarGastoBanco(xcodcta, xidregistro, xitems, xnrocheque, xfecha, xconcepto, xcodbco: String; xmonto: Real; xcantitems: Integer);
+// Objetivo...: Registrar gastos bancarios
+Begin
+  {if (xitems = '01') then begin
+    datosdb.tranSQL('delete from ' + gastosbco.TableName + ' where codcta = ' + '''' + xcodcta + '''' + ' and idregistro = ' + '"' + xidregistro + '"');
+    datosdb.closedb(gastosbco); gastosbco.open;
+  end;}
+  if BuscarGastoBanco(xcodcta, xidregistro, xitems) then gastosbco.Edit else gastosbco.Append;
+  gastosbco.FieldByName('codcta').AsString     := xcodcta;
+  gastosbco.FieldByName('idregistro').AsString := xidregistro;
+  gastosbco.FieldByName('items').AsString      := xitems;
+  gastosbco.FieldByName('nrocheque').AsString  := xnrocheque;
+  gastosbco.FieldByName('fecha').AsString      := utiles.sExprFecha2000(xfecha);
+  gastosbco.FieldByName('concepto').AsString   := xconcepto;
+  gastosbco.FieldByName('codbco').AsString     := xcodbco;
+  gastosbco.FieldByName('monto').AsFloat       := xmonto;
+  try
+    gastosbco.Post
+   except
+    gastosbco.Cancel
+  end;
+  datosdb.closedb(gastosbco); gastosbco.open;
+  {if xitems = utiles.sLlenarIzquierda(IntToStr(xcantitems), 2, '0') then begin
+    datosdb.tranSQL('delete from ' + gastosbco.TableName + ' where codcta = ' + '''' + xcodcta + '''' + ' and idregistro = ' + '"' + xidregistro + '"' + ' and items > ' + '"' + utiles.sLlenarIzquierda(IntToStr(xcantitems), 2, '0') + '"');
+    datosdb.closedb(gastosbco); gastosbco.open;
+  end;}
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Registrando Gasto Banco ' + xnrocheque + '-' + xidregistro);
+end;
+
+procedure TTGastosADR.BorrarItemsGasto(xcodcta, xidregistro: String);
+// Objetivo...: Borrar gastos bancarios
+Begin
+  datosdb.tranSQL('delete from ' + gastosbco.TableName + ' where codcta = ' + '''' + xcodcta + '''' + ' and idregistro = ' + '"' + xidregistro + '"');
+  datosdb.closedb(gastosbco); gastosbco.open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Borrando Items Gasto ' + xidregistro);
+end;
+
+function  TTGastosADR.setCheques(xcodcta, xidregistro: String): TStringList;
+// Objetivo...: Devolver un set de cheques
+var
+  l: TStringList;
+Begin
+  l := TStringList.Create;
+  utiles.msgerror(xidregistro);
+  if BuscarGastoBanco(xcodcta, xidregistro, '01') then Begin
+    while not gastosbco.Eof do Begin
+      if (gastosbco.FieldByName('codcta').AsString <> xcodcta) or (gastosbco.FieldByName('idregistro').AsString <> xidregistro) then Break;
+      l.Add(gastosbco.FieldByName('items').AsString + gastosbco.FieldByName('codbco').AsString + gastosbco.FieldByName('fecha').AsString + gastosbco.FieldByName('nrocheque').AsString + ';1' + gastosbco.FieldByName('monto').AsString + ';2' + gastosbco.FieldByName('concepto').AsString);
+      gastosbco.Next;
+    end;
+  end;
+  Result := l;
+end;
+
+procedure TTGastosADR.BorrarCuentasBancarias;
+// Objetivo...: Borrar Cuentas Bancarias
+Begin
+  datosdb.tranSQL(planctas.path, 'delete from ' + ctasctesbcos.TableName);
+  datosdb.closeDB(ctasctesbcos); ctasctesbcos.Open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Borrando Cuentas Bancarias');
+end;
+
+procedure TTGastosADR.RegistrarCuentaBancaria(xcodcta, xcuenta: String);
+// Objetivo...: Borrar Cuentas Bancarias
+Begin
+  if not ctasctesbcos.FindKey([xcodcta]) then ctasctesbcos.Append else ctasctesbcos.Edit;
+  ctasctesbcos.FieldByName('codcta').AsString := xcodcta;
+  ctasctesbcos.FieldByName('cuenta').AsString := xcuenta;
+  try
+    ctasctesbcos.Post
+   except
+    ctasctesbcos.Cancel
+  end;
+  datosdb.closedb(ctasctesbcos); ctasctesbcos.Open;
+  logsist.RegistrarLog(usuario.usuario, 'Gastos', 'Definiendo Cuenta Bancaria ' + xcodcta + '-' + xcuenta);
+end;
+
+function  TTGastosADR.setCuentasBancarias: TStringList;
+// Objetivo...: Borrar Cuentas Bancarias
+var
+  l: TStringList;
+Begin
+  l := TStringList.Create;
+  ctasctesbcos.First;
+  while not ctasctesbcos.Eof do Begin
+    l.Add(ctasctesbcos.FieldByName('codcta').AsString + ctasctesbcos.FieldByName('cuenta').AsString);
+    ctasctesbcos.Next;
+  end;
+  Result := l;
+end;
+
+function  TTGastosADR.BuscarCuenta(xcodcta: String): Boolean;
+// Objetivo...: Buscar Cuenta
+Begin
+  Result := ctasctesbcos.FindKey([xcodcta]);
+end;
+
+function  TTGastosADR.setCuenta(xcodcta: String): String;
+// Objetivo...: Buscar Cuenta
+Begin
+  if ctasctesbcos.FindKey([xcodcta]) then Result := ctasctesbcos.FieldByName('cuenta').AsString else Result := '';
+end;
+
+procedure TTGastosADR.RegistrarTrans(xperiodo, xtrans: string);
+begin
+  if (datosdb.Buscar(transgastos, 'periodo', 'transac', xperiodo, xtrans)) then transgastos.Edit else transgastos.Append;
+  transgastos.FieldByName('periodo').AsString := xperiodo;
+  transgastos.FieldByName('transac').AsString := xtrans;
+  try
+    transgastos.Post
+  except
+    transgastos.Cancel
+  end;
+  datosdb.closeDB(transgastos); transgastos.Open;
+end;
+
+function  TTGastosADR.getNuevaTrans(xperiodo: string): string;
+begin
+  datosdb.Filtrar(transgastos, 'periodo = ' + '''' + xperiodo + '''');
+  if (transgastos.RecordCount = 0) then result := '00000001' else begin
+    transgastos.Last;
+    result := utiles.sLlenarIzquierda(IntToStr(transgastos.FieldByName('transac').AsInteger + 1), 8, '0');
+  end;
+  datosdb.QuitarFiltro(transgastos);
+end;
+
+procedure TTGastosADR.SincronizarFechas;
+Begin
+  gasto.First;
+  while not gasto.Eof do Begin
+    if BuscarGastoBanco(gasto.FieldByName('codcta').AsString, gasto.FieldByName('idregistro').AsString, '01') then Begin
+      gasto.Edit;
+      gasto.FieldByName('fechach').AsString := gastosbco.FieldByName('fecha').AsString;
+      try
+        gasto.Post
+       except
+        gasto.Cancel
+      end;
+    end else Begin
+      gasto.Edit;
+      gasto.FieldByName('fechach').AsString := gasto.FieldByName('fecha').AsString;
+      try
+        gasto.Post
+       except
+        gasto.Cancel
+      end;
+    end;
+    gasto.Next;
+  end;
+  datosdb.closeDB(gasto); gasto.Open;
+end;
+
+procedure TTGastosADR.SincronizarFechasEfectivo;
+Begin
+  gasto.First;
+  while not gasto.Eof do Begin
+    if Length(Trim(gasto.FieldByName('fechach').AsString)) = 0 then Begin
+      gasto.Edit;
+      gasto.FieldByName('fechach').AsString := gasto.FieldByName('fecha').AsString;
+      try
+        gasto.Post
+       except
+        gasto.Cancel
+      end;
+    end;
+    gasto.Next;
+  end;
+  datosdb.closeDB(gasto); gasto.Open;
+end;
+
+procedure TTGastosADR.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not gasto.Active then gasto.Open;
+    if not distgastos.Active then distgastos.Open;
+    if not gastosbco.Active then gastosbco.Open;
+    if not ctasctesbcos.Active then ctasctesbcos.Open;
+    if not transgastos.Active then transgastos.Open;
+  end;
+  planctas.conectar;
+  proveedor.conectar;
+  entbcos.conectar;
+  Inc(conexiones);
+end;
+
+procedure TTGastosADR.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(gasto);
+    datosdb.closeDB(distgastos);
+    datosdb.closeDB(gastosbco);
+    datosdb.closeDB(ctasctesbcos);
+    datosdb.closeDB(transgastos);
+  end;
+  planctas.DesactivarFiltro;
+  planctas.desconectar;
+  proveedor.desconectar;
+  entbcos.desconectar;
+end;
+
+{===============================================================================}
+
+function gastoasoc: TTGastosADR;
+begin
+  if xgastoasoc = nil then
+    xgastoasoc := TTGastosADR.Create;
+  Result := xgastoasoc;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xgastoasoc.Free;
+
+end.

@@ -1,0 +1,592 @@
+unit CCajaCIC;
+
+interface
+
+uses CConceptosCajaCCExterior, CBDT, SysUtils, DBTables, CUtiles, CListar,
+     Classes, CIDBFM, Contnrs, CServers2000_Excel;
+
+type
+
+TTCaja = class
+  idregistro, Fecha, Tipomov, Idc, Tipo, Sucursal, Numero, Idconcepto, Concepto, Registro, Transferencia, Codbanco: String;
+  Monto, Saldo: Real;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xidregistro: String): Boolean;
+  function    Registrar(xidregistro, xfecha, xtipomov, xidc, xtipo, xsucursal, xnumero, xidconcepto, xconcepto, xregistro: String; xmonto: Real; xrecalcular_saldo: Boolean): String;
+  procedure   getDatos(xidregistro: String);
+  procedure   Borrar(xidregistro: String);
+
+  function    setMovimientosCaja(xfecha: String): TObjectList;
+  function    setTransferencias: TStringList;
+
+  procedure   ListarLibro(xdesde, xhasta: String; salida: char);
+  procedure   ListarConceptos(xdesde, xhasta: String; xlista: TStringList; salida: char);
+
+  procedure   ReCalcularSaldo; overload;
+  procedure   ReCalcularSaldo(xdesdeFecha: String); overload;
+  procedure   ActualizarSaldo;
+
+  function    setIdRegistro(xtipomov, xidc, xtipo, xsucursal, xnumero: String): String;
+
+  procedure   TransferirOperacion(xidregistro, xcuenta, xcodbanco: String);
+  procedure   AnularTransferir(xidregistro: String);
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  ldat: Boolean;
+  totales: array[1..5] of Real;
+  lt: TStringList;
+  fecha_menor, l1: String;
+  c1: Integer;
+  procedure   CalcularSaldo(xidregistro, xtipomov: String; xmonto: Real);
+end;
+
+function caja1: TTCaja;
+
+implementation
+
+var
+  xcaja: TTCaja = nil;
+
+constructor TTCaja.Create;
+begin
+  tabla := datosdb.openDB('caja1', '');
+  lt    := TStringList.Create;
+end;
+
+destructor TTCaja.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTCaja.Buscar(xidregistro: String): Boolean;
+// Objetivo...: Recuperar una instancia
+Begin
+  if tabla.IndexFieldNames <> 'idregistro' then tabla.IndexFieldNames := 'idregistro';
+  Result := tabla.FindKey([xidregistro]);
+end;
+
+function TTCaja.Registrar(xidregistro, xfecha, xtipomov, xidc, xtipo, xsucursal, xnumero, xidconcepto, xconcepto, xregistro: String; xmonto: Real; xrecalcular_saldo: Boolean): String;
+// Objetivo...: Registrar una instancia
+var
+  idmov: String;
+Begin
+  idmov := xidregistro;
+  if Length(Trim(xidregistro)) = 0 then idmov := utiles.setIdRegistroFecha + '00';
+  if Buscar(idmov) then tabla.Edit else tabla.Append;
+  utiles.msgError(idmov); 
+  tabla.FieldByName('idregistro').AsString := idmov;
+  tabla.FieldByName('fecha').AsString      := utiles.sExprFecha2000(xfecha);
+  tabla.FieldByName('tipomov').AsString    := xtipomov;
+  tabla.FieldByName('idc').AsString        := xidc;
+  tabla.FieldByName('tipo').AsString       := xtipo;
+  tabla.FieldByName('sucursal').AsString   := xsucursal;
+  tabla.FieldByName('numero').AsString     := xnumero;
+  tabla.FieldByName('idconcepto').AsString := xidconcepto;
+  tabla.FieldByName('concepto').AsString   := xconcepto;
+  tabla.FieldByName('registro').AsString   := xregistro;
+  tabla.FieldByName('monto').AsFloat       := xmonto;
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+
+  if xrecalcular_saldo then CalcularSaldo(idmov, xtipomov, xmonto) else Begin
+    datosdb.closeDB(tabla); tabla.Open;
+  End;
+
+  Result := idmov;
+end;
+
+procedure TTCaja.getDatos(xidregistro: String);
+// Objetivo...: Recuperar una instancia
+Begin
+  if Buscar(xidregistro) then Begin
+    idregistro    := tabla.FieldByName('idregistro').AsString;
+    fecha         := utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString);
+    tipomov       := tabla.FieldByName('tipomov').AsString;
+    idc           := tabla.FieldByName('idc').AsString;
+    tipo          := tabla.FieldByName('tipo').AsString;
+    sucursal      := tabla.FieldByName('sucursal').AsString;
+    numero        := tabla.FieldByName('numero').AsString;
+    idconcepto    := tabla.FieldByName('idconcepto').AsString;
+    concepto      := tabla.FieldByName('concepto').AsString;
+    registro      := tabla.FieldByName('registro').AsString;
+    monto         := tabla.FieldByName('monto').AsFloat;
+    transferencia := tabla.FieldByName('transferencia').AsString;
+    codbanco      := tabla.FieldByName('codbanco').AsString;
+  end else Begin
+    idregistro    := '';
+    fecha         := '';
+    tipomov       := '';
+    idc           := '';
+    tipo          := '';
+    sucursal      := '';
+    numero        := '';
+    idconcepto    := '';
+    concepto      := '';
+    registro      := '';
+    monto         := 0;
+    transferencia := '';
+    codbanco      := '';
+  end;
+end;
+
+procedure TTCaja.Borrar(xidregistro: String);
+// Objetivo...: Recuperar una instancia
+var
+  f: String;
+Begin
+  if Buscar(xidregistro) then Begin
+    tabla.Prior;
+    if not tabla.Bof then f := utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString);
+    Buscar(xidregistro);
+    tabla.Delete;
+    datosdb.closeDB(tabla); tabla.Open;
+    RecalcularSaldo(f);
+    //CalcularSaldo(tabla.FieldByName('idregistro').AsString, tabla.FieldByName('tipomov').AsString, tabla.FieldByName('monto').AsFloat);
+  end;
+end;
+
+function  TTCaja.setMovimientosCaja(xfecha: String): TObjectList;
+// Objetivo...: Devolver Movimientos del día
+var
+  l: TObjectList;
+  objeto: TTCaja;
+Begin
+  l := TObjectList.Create;
+  if tabla.IndexFieldNames <> 'Fecha;Idregistro' then tabla.IndexFieldNames := 'Fecha;Idregistro';
+  if tabla.FindKey([utiles.sExprFecha2000(xfecha)]) then Begin
+    while not tabla.Eof do Begin
+      if tabla.FieldByName('fecha').AsString <> utiles.sExprFecha2000(xfecha) then Break;
+      objeto := TTCaja.Create;
+      objeto.idregistro    := tabla.FieldByName('idregistro').AsString;
+      objeto.fecha         := utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString);
+      objeto.Tipomov       := tabla.FieldByName('tipomov').AsString;
+      objeto.idc           := tabla.FieldByName('idc').AsString;
+      objeto.Tipo          := tabla.FieldByName('tipo').AsString;
+      objeto.Sucursal      := tabla.FieldByName('sucursal').AsString;
+      objeto.Numero        := tabla.FieldByName('numero').AsString;
+      objeto.Idconcepto    := tabla.FieldByName('idconcepto').AsString;
+      objeto.Concepto      := tabla.FieldByName('concepto').AsString;
+      objeto.Monto         := tabla.FieldByName('monto').AsFloat;
+      objeto.Saldo         := tabla.FieldByName('saldo').AsFloat;
+      objeto.Codbanco      := tabla.FieldByName('codbanco').AsString;
+      objeto.Transferencia := tabla.FieldByName('transferencia').AsString;
+      l.Add(objeto);
+      tabla.Next;
+    end;
+  end;
+
+  Result := l;
+end;
+
+function  TTCaja.setTransferencias: TStringList;
+// Objetivo...: Retornar las transacciones
+Begin
+  result := lt;
+end;
+
+procedure TTCaja.CalcularSaldo(xidregistro, xtipomov: String; xmonto: Real);
+// Objetivo...: Calcular Saldo de Caja
+var
+  saldo: Real;
+Begin
+  saldo := 0;
+  if Buscar(xidregistro) then Begin
+    tabla.Prior;
+    if not tabla.Bof then saldo := tabla.FieldByName('saldo').AsFloat;
+    Buscar(xidregistro);
+  end;
+
+  while not tabla.Eof do Begin
+    if tabla.FieldByName('tipomov').AsString = '1' then saldo := saldo + tabla.FieldByName('monto').AsFloat;
+    if tabla.FieldByName('tipomov').AsString = '2' then saldo := saldo - tabla.FieldByName('monto').AsFloat;
+    if tabla.FieldByName('saldo').AsFloat <> saldo then Begin
+      tabla.Edit;
+      tabla.FieldByName('saldo').AsFloat := saldo;
+      try
+        tabla.Post
+       except
+        tabla.Cancel
+      end;
+    end;
+    tabla.Next;
+  end;
+  datosdb.closeDB(tabla); tabla.Open;
+end;
+
+procedure TTCaja.ReCalcularSaldo;
+// Objetivo...: cerrar tablas de persistencia
+var
+  saldo: Real;
+Begin
+  if tabla.IndexFieldNames <> 'Fecha;Idregistro' then tabla.IndexFieldNames := 'Fecha;Idregistro';
+  saldo := 0;
+  tabla.First;
+  while not tabla.Eof do Begin
+    if tabla.FieldByName('tipomov').AsString = '1' then saldo := saldo + tabla.FieldByName('monto').AsFloat;
+    if tabla.FieldByName('tipomov').AsString = '2' then saldo := saldo - tabla.FieldByName('monto').AsFloat;
+    if tabla.FieldByName('saldo').AsFloat <> saldo then Begin
+      tabla.Edit;
+      tabla.FieldByName('saldo').AsFloat := saldo;
+      try
+        tabla.Post
+       except
+        tabla.Cancel
+      end;
+    end;
+    tabla.Next;
+  end;
+  datosdb.closeDB(tabla); tabla.Open;
+  tabla.IndexFieldNames := 'Idregistro';
+end;
+
+procedure TTCaja.ReCalcularSaldo(xdesdeFecha: String);
+// Objetivo...: Calcular Saldo de Caja
+var
+  saldo: Real;
+  recalcula: Boolean;
+Begin
+  tabla.IndexFieldNames := 'Fecha';
+  saldo := 0;
+  if tabla.FindKey([utiles.sExprFecha2000(xdesdeFecha)]) then Begin
+    tabla.Prior;
+    if not tabla.Bof then Begin
+      saldo := tabla.FieldByName('saldo').AsFloat;
+      tabla.Next;
+    end else
+      tabla.First;
+    recalcula := True;
+  end;
+
+  if recalcula then Begin
+    while not tabla.Eof do Begin
+      if tabla.FieldByName('tipomov').AsString = '1' then saldo := saldo + tabla.FieldByName('monto').AsFloat;
+      if tabla.FieldByName('tipomov').AsString = '2' then saldo := saldo - tabla.FieldByName('monto').AsFloat;
+      tabla.Edit;
+      tabla.FieldByName('saldo').AsFloat := saldo;
+      try
+        tabla.Post
+       except
+        tabla.Cancel
+      end;
+      tabla.Next;
+    end;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+
+  tabla.IndexFieldNames := 'IdRegistro';
+end;
+
+procedure TTCaja.ActualizarSaldo;
+// Objetivo...: Actualizar Saldo
+Begin
+  if Length(Trim(fecha_menor)) > 0 then ReCalcularSaldo(utiles.sFormatoFecha(fecha_menor));
+  fecha_menor := '';
+end;
+
+procedure TTCaja.ListarLibro(xdesde, xhasta: String; salida: char);
+// Objetivo...: Generar Informe
+Begin
+  if (salida <> 'X') then begin
+    list.Setear(salida);
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' Libro de Caja Diaria - Lapso: ' + xdesde + '-' + xhasta, 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, 'Fecha', 1, 'Arial, cursiva, 8');
+    List.Titulo(8, list.Lineactual, 'Comprobante', 2, 'Arial, cursiva, 8');
+    List.Titulo(25, list.Lineactual, 'Concepto', 3, 'Arial, cursiva, 8');
+    List.Titulo(68, list.Lineactual, 'Ingresos', 4, 'Arial, cursiva, 8');
+    List.Titulo(79, list.Lineactual, 'Egresos', 5, 'Arial, cursiva, 8');
+    List.Titulo(90, list.Lineactual, 'Saldo', 6, 'Arial, cursiva, 8');
+    List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+  end;
+  if salida = 'X' then Begin
+    Inc(c1); l1 := Trim(IntToStr(c1));
+    excel.setString('b' + l1, 'b' + l1, ' Libro de Caja Diaria - Lapso: ' + xdesde + '-' + xhasta, 'Arial, negrita, 12');
+    Inc(c1); l1 := Trim(IntToStr(c1));
+    excel.setString('a' + l1, 'a' + l1, 'Fecha', 'Arial, normal, 8');
+    excel.setString('b' + l1, 'b' + l1, 'Comprobante', 'Arial, normal, 8');
+    excel.setString('c' + l1, 'c' + l1, 'Concepto', 'Arial, normal, 8');
+    excel.setString('d' + l1, 'd' + l1, 'Ingresos', 'Arial, normal, 8');
+    excel.setString('e' + l1, 'e' + l1, 'Egresos', 'Arial, normal, 8');
+    excel.setString('f' + l1, 'f' + l1, 'Saldo', 'Arial, normal, 8');
+    excel.FijarAnchoColumna('c' + l1, 'c' + l1, 37);
+    excel.FijarAnchoColumna('b' + l1, 'b' + l1, 20);
+  end;
+
+  if tabla.IndexFieldNames <> 'Fecha;Idregistro' then tabla.IndexFieldNames := 'Fecha;Idregistro';
+  datosdb.Filtrar(tabla, 'fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''');
+  tabla.First; ldat := False; totales[1] := 0; totales[2] := 0; totales[3] := 0;
+  while not tabla.Eof do Begin
+    if totales[1] + totales[2] = 0 then Begin
+      if (salida <> 'X') then begin
+        list.Linea(0, 0, 'Saldo Anterior: ', 1, 'Arial, negrita, 8', salida, 'N');
+      end;
+      if (salida = 'X') then begin
+        Inc(c1); l1 := Trim(IntToStr(c1));
+        excel.setString('c' + l1, 'c' + l1, 'S.Anterior:', 'Arial, negrita, 8');
+      end;
+
+
+      if (salida <> 'X') then begin
+        if tabla.FieldByName('tipomov').AsString = '1' then
+          list.importe(95, list.Lineactual, '', tabla.FieldByName('saldo').AsFloat - tabla.FieldByName('monto').AsFloat, 2, 'Arial, negrita, 8');
+        if tabla.FieldByName('tipomov').AsString = '2' then
+          list.importe(95, list.Lineactual, '', tabla.FieldByName('saldo').AsFloat + tabla.FieldByName('monto').AsFloat, 2, 'Arial, negrita, 8');
+        list.Linea(95, list.Lineactual, '', 3, 'Arial, negrita, 8', salida, 'S');
+        list.Linea(0, 0, '', 1, 'Arial, negrita, 5', salida, 'S');
+      end;
+      if (salida = 'X') then begin
+        if tabla.FieldByName('tipomov').AsString = '1' then
+          excel.setReal('d' + l1, 'd' + l1, tabla.FieldByName('saldo').AsFloat - tabla.FieldByName('monto').AsFloat, 'Arial, negrita, 8');
+        if tabla.FieldByName('tipomov').AsString = '2' then
+          excel.setReal('d' + l1, 'd' + l1, tabla.FieldByName('saldo').AsFloat + tabla.FieldByName('monto').AsFloat, 'Arial, negrita, 8');
+      end;
+
+    End;
+
+    if (salida <> 'X') then begin
+      list.Linea(0, 0, utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString), 1, 'Arial, normal, 8', salida, 'N');
+      list.Linea(8, list.Lineactual, tabla.FieldByName('idc').AsString, 2, 'Arial, normal, 8', salida, 'N');
+      list.Linea(11, list.Lineactual, tabla.FieldByName('tipo').AsString + ' ' + tabla.FieldByName('sucursal').AsString + '-' + tabla.FieldByName('numero').AsString, 3, 'Arial, normal, 8', salida, 'N');
+      list.Linea(25, list.Lineactual, tabla.FieldByName('concepto').AsString, 4, 'Arial, normal, 8', salida, 'N');
+      if tabla.FieldByName('tipomov').AsString = '1' then Begin
+        list.importe(75, list.Lineactual, '', tabla.FieldByName('monto').AsFloat, 5, 'Arial, normal, 8');
+        totales[1] := totales[1] + tabla.FieldByName('monto').AsFloat;
+      end;
+      if tabla.FieldByName('tipomov').AsString = '2' then Begin
+        list.importe(85, list.Lineactual, '', tabla.FieldByName('monto').AsFloat, 5, 'Arial, normal, 8');
+        totales[2] := totales[2] + tabla.FieldByName('monto').AsFloat;
+      end;
+      list.importe(95, list.Lineactual, '', tabla.FieldByName('saldo').AsFloat, 6, 'Arial, normal, 8');
+      list.Linea(96, list.Lineactual, '', 7, 'Arial, normal, 8', salida, 'S');
+      totales[3] := tabla.FieldByName('saldo').AsFloat;
+      ldat := True;
+    end;
+    if (salida = 'X') then begin
+      Inc(c1); l1 := Trim(IntToStr(c1));
+      excel.setString('a' + l1, 'a' + l1, utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString), 'Arial, normal, 8');
+      excel.setString('b' + l1, 'b' + l1, tabla.FieldByName('idc').AsString + '  ' + tabla.FieldByName('tipo').AsString + '  ' + tabla.FieldByName('sucursal').AsString + '-' + tabla.FieldByName('numero').AsString, 'Arial, normal, 8');
+      excel.setString('c' + l1, 'c' + l1, tabla.FieldByName('concepto').AsString, 'Arial, normal, 8');
+      if tabla.FieldByName('tipomov').AsString = '1' then Begin
+        excel.setReal('d' + l1, 'd' + l1, tabla.FieldByName('monto').AsFloat, 'Arial, normal, 8');
+        totales[1] := totales[1] + tabla.FieldByName('monto').AsFloat;
+      end;
+      if tabla.FieldByName('tipomov').AsString = '2' then Begin
+        excel.setReal('e' + l1, 'e' + l1, tabla.FieldByName('monto').AsFloat, 'Arial, normal, 8');
+        totales[2] := totales[2] + tabla.FieldByName('monto').AsFloat;
+      end;
+      excel.setReal('f' + l1, 'f' + l1, tabla.FieldByName('saldo').AsFloat, 'Arial, normal, 8');
+      totales[3] := tabla.FieldByName('saldo').AsFloat;
+      ldat := True;
+    end;
+
+    tabla.Next;
+  end;
+  datosdb.QuitarFiltro(tabla);
+  tabla.IndexFieldNames := 'Idregistro';
+
+  if totales[1] + totales[2] > 0 then Begin
+    if (salida <> 'X') then Begin
+      list.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+      list.Linea(0, 0, 'Subtotales / Saldo Actual:', 1, 'Arial, negrita, 8', salida, 'N');
+      list.importe(75, list.Lineactual, '', totales[1], 2, 'Arial, negrita, 8');
+      list.importe(85, list.Lineactual, '', totales[2], 3, 'Arial, negrita, 8');
+      list.importe(95, list.Lineactual, '', totales[3], 4, 'Arial, negrita, 8');
+      list.Linea(96, list.Lineactual, '', 5, 'Arial, negrita, 8', salida, 'S');
+    End;
+    if (salida = 'X') then Begin
+      Inc(c1); l1 := Trim(IntToStr(c1));
+      excel.setString('a' + l1, 'a' + l1, 'Subtotales / Saldo Actual:', 'Arial, negrita, 8');
+      excel.setReal('d' + l1, 'd' + l1, totales[1], 'Arial, negrita, 8');
+      excel.setReal('e' + l1, 'e' + l1, totales[2], 'Arial, negrita, 8');
+      excel.setReal('f' + l1, 'f' + l1, totales[3], 'Arial, negrita, 8');
+    End;
+  end;
+
+  if not ldat then list.Linea(0, 0, 'No Existen Datos para Listar ...!', 1, 'Arial, normal, 11', salida, 'S');
+
+  if (salida <> 'X') then list.FinList;
+  if (salida = 'X') then excel.Visulizar;
+end;
+
+procedure TTCaja.ListarConceptos(xdesde, xhasta: String; xlista: TStringList; salida: char);
+// Objetivo...: Listar Conceptos
+var
+  idcanter, tm: String;
+
+  procedure ListarSubtotal(salida: char);
+  Begin
+    if totales[1] + totales[2] > 0 then Begin
+      list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'N');
+      list.derecha(95, list.Lineactual, '', '------------------------------------------', 2, 'Arial, normal, 8');
+      list.Linea(95, list.Lineactual, '', 3, 'Arial, normal, 8', salida, 'S');
+      list.Linea(0, 0, 'Subtotales:', 1, 'Arial, negrita, 9', salida, 'N');
+      list.importe(85, list.Lineactual, '', totales[1], 2, 'Arial, negrita, 9');
+      list.importe(95, list.Lineactual, '', totales[2], 3, 'Arial, negrita, 9');
+      list.Linea(95, list.Lineactual, '', 4, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+      list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+      totales[1] := 0; totales[2] := 0;
+    end;
+  end;
+
+  procedure Listar(xtipomov: String; salida: char);
+  Begin
+    tabla.First; ldat := False; totales[1] := 0; totales[2] := 0; totales[3] := 0; idcanter := '';
+    while not tabla.Eof do Begin
+      if (utiles.verificarItemsLista(xlista, tabla.FieldByName('idconcepto').AsString)) and (tabla.FieldByName('tipomov').AsString = xtipomov) then Begin
+
+        if tabla.FieldByName('tipomov').AsString <> tm then Begin
+          list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+          if tabla.FieldByName('tipomov').AsString = '1' then  list.Linea(0, 0, '***  INGRESOS  ***', 1, 'Arial, normal, 12', salida, 'S');
+          if tabla.FieldByName('tipomov').AsString = '2' then  list.Linea(0, 0, '***  EGRESOS  ***', 1, 'Arial, normal, 12', salida, 'S');
+          list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+          tm := tabla.FieldByName('tipomov').AsString;
+        end;
+
+        if tabla.FieldByName('idconcepto').AsString <> idcanter then Begin
+          ListarSubtotal(salida);
+          conccaja.getDatos(tabla.FieldByName('idconcepto').AsString);
+          list.Linea(0, 0, 'Concepto: ' + conccaja.concepto, 1, 'Arial, negrita, 9', salida, 'S');
+          list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+          idcanter := tabla.FieldByName('idconcepto').AsString;
+        end;
+        list.Linea(0, 0, utiles.sFormatoFecha(tabla.FieldByName('fecha').AsString), 1, 'Arial, normal, 8', salida, 'N');
+        list.Linea(8, list.Lineactual, tabla.FieldByName('idc').AsString, 2, 'Arial, normal, 8', salida, 'N');
+        list.Linea(11, list.Lineactual, tabla.FieldByName('tipo').AsString + ' ' + tabla.FieldByName('sucursal').AsString + '-' + tabla.FieldByName('numero').AsString, 3, 'Arial, normal, 8', salida, 'N');
+        list.Linea(25, list.Lineactual, tabla.FieldByName('concepto').AsString, 4, 'Arial, normal, 8', salida, 'N');
+        if tabla.FieldByName('tipomov').AsString = '1' then Begin
+          list.importe(85, list.Lineactual, '', tabla.FieldByName('monto').AsFloat, 5, 'Arial, normal, 8');
+          totales[1] := totales[1] + tabla.FieldByName('monto').AsFloat;
+        end;
+        if tabla.FieldByName('tipomov').AsString = '2' then Begin
+          list.importe(95, list.Lineactual, '', tabla.FieldByName('monto').AsFloat, 5, 'Arial, normal, 8');
+          totales[2] := totales[2] + tabla.FieldByName('monto').AsFloat;
+        end;
+        list.Linea(95, list.Lineactual, '', 6, 'Arial, normal, 8', salida, 'S');
+      end;
+
+      tabla.Next;
+    end;
+    ListarSubtotal(salida);
+  end;
+
+Begin
+  list.Setear(salida);
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Movimientos de Caja Discriminados por Conceptos - Lapso: ' + xdesde + '-' + xhasta, 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Fecha', 1, 'Arial, cursiva, 8');
+  List.Titulo(8, list.Lineactual, 'Comprobante', 2, 'Arial, cursiva, 8');
+  List.Titulo(25, list.Lineactual, 'Concepto', 3, 'Arial, cursiva, 8');
+  List.Titulo(78, list.Lineactual, 'Ingresos', 4, 'Arial, cursiva, 8');
+  List.Titulo(89, list.Lineactual, 'Egresos', 5, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  conccaja.QuitarFiltro;
+
+  if tabla.IndexFieldNames <> 'Fecha' then tabla.IndexFieldNames := 'Fecha';
+  datosdb.Filtrar(tabla, 'fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''');
+  Listar('1', salida);
+  Listar('2', salida);
+  datosdb.QuitarFiltro(tabla);
+  tabla.IndexFieldNames := 'Idregistro';
+
+  list.FinList;
+end;
+
+function TTCaja.setIdRegistro(xtipomov, xidc, xtipo, xsucursal, xnumero: String): String;
+// Objetivo...: Retornar El Id. del registro a partir del comprobante
+Begin
+  tabla.IndexFieldNames := 'tipomov;idc;tipo;sucursal;numero';
+  if datosdb.Buscar(tabla, 'tipomov', 'idc', 'tipo', 'sucursal', 'numero', xtipomov, xidc, xtipo, xsucursal, xnumero) then
+    Result := tabla.FieldByName('idregistro').AsString
+  else
+    Result := '';
+  tabla.IndexFieldNames := 'idregistro';
+end;
+
+procedure TTCaja.TransferirOperacion(xidregistro, xcuenta, xcodbanco: String);
+// Objetivo...: Transferir Operación a una Cuenta Bancaria
+begin
+  if Buscar(xidregistro) then Begin
+    tabla.Edit;
+    tabla.FieldByName('transferencia').AsString := xcuenta;
+    tabla.FieldByName('codbanco').AsString      := xcodbanco;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+end;
+
+procedure TTCaja.AnularTransferir(xidregistro: String);
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if Buscar(xidregistro) then Begin
+    tabla.Edit;
+    tabla.FieldByName('transferencia').AsString := '';
+    tabla.FieldByName('codbanco').AsString      := '';
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+end;
+
+procedure TTCaja.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  conccaja.conectar;
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTCaja.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  conccaja.desconectar;
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+  end;
+end;
+
+{===============================================================================}
+
+function caja1: TTCaja;
+begin
+  if xcaja = nil then
+    xcaja := TTCaja.Create;
+  Result := xcaja;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xcaja.Free;
+
+end.

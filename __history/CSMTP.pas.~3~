@@ -1,0 +1,145 @@
+unit CSMTP;
+
+interface
+
+uses SysUtils, CUtiles, CSMTPIndy, IdComponent, IdTCPConnection, IdTCPClient,
+  IdExplicitTLSClientServerBase, IdMessageClient, IdSMTPBase, IdSMTP,
+  IdBaseComponent, IdMessage, Classes, IdAttachmentFile, IdAntiFreeze;
+
+type
+
+TTSMTP = class
+  IdMessage: TIdMessage;
+  IdSMTP: TIdSMTP;
+  IdAntiFreeze: TIdAntiFreeze;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure ConectarSMTP( sUsuario, sClave, sHost: String );
+  procedure ConectarSMTPSinAntiFreeze( sUsuario, sClave, sHost: String; sPuerto: integer );
+  procedure EnviarMensaje( sAsunto, sDestino, sMensaje, sAdjunto: String );
+  procedure DesconectarSMTP;
+ private
+  { Declaraciones Privadas }
+  SMTP: TIdSMTP;
+
+end;
+
+
+implementation
+
+constructor TTSMTP.Create;
+begin
+end;
+
+destructor TTSMTP.Destroy;
+begin
+  inherited Destroy;
+end;
+
+
+procedure TTSMTP.ConectarSMTP( sUsuario, sClave, sHost: String );
+begin
+  IdAntiFreeze := TIdAntiFreeze.Create(nil);
+  IdAntiFreeze.ApplicationHasPriority := true;
+  IdAntiFreeze.IdleTimeOut := 250;
+  IdAntiFreeze.OnlyWhenIdle := true;
+  IdAntiFreeze.Active := true;
+
+  // Creamos el componente de conexión con el servidor
+  SMTP := TIdSMTP.Create( nil );
+  SMTP.Username := sUsuario;
+  SMTP.Password := sClave;
+  SMTP.Host := sHost;
+  SMTP.Port := 25;
+  SMTP.AuthType := atDefault;
+
+  // Conectamos con el servidor SMTP
+  try
+    SMTP.Connect;
+  except
+    raise Exception.Create( 'Error al conectar con el servidor.' );
+  end;
+end;
+
+procedure TTSMTP.ConectarSMTPSinAntiFreeze( sUsuario, sClave, sHost: String; sPuerto: integer );
+begin
+  // Creamos el componente de conexión con el servidor
+  SMTP := TIdSMTP.Create( nil );
+  SMTP.Username := sUsuario;
+  SMTP.Password := sClave;
+  SMTP.Host := sHost;
+  SMTP.Port := sPuerto;
+  SMTP.AuthType := atDefault;
+
+  // Conectamos con el servidor SMTP
+  try
+    SMTP.Connect;
+  except
+    raise Exception.Create( 'Error al conectar con el servidor.' );
+  end;
+end;
+
+
+procedure TTSMTP.EnviarMensaje( sAsunto, sDestino, sMensaje, sAdjunto: String );
+var
+   Mensaje: TIdMessage;
+   Adjunto: TIdAttachmentFile;
+begin
+  // Creamos el contenido del mensaje
+  Mensaje := TIdMessage.Create( nil );
+  Mensaje.Clear;
+  Mensaje.From.Name                   := sDestino;
+  Mensaje.From.Address                := sDestino;
+  Mensaje.Subject                     := sAsunto;
+  Mensaje.Body.Text                   := sMensaje;
+  Mensaje.Recipients.Add;
+  Mensaje.Recipients.Items[0].Address := sDestino;
+  Mensaje.ReceiptRecipient.Text       := sAsunto;
+
+  // Si hay que meter un archivo adjunto lo creamos y lo asignamos al mensaje
+  if sAdjunto <> '' then
+  begin
+    if FileExists( sAdjunto ) then
+      Adjunto := TIdAttachmentFile.Create( Mensaje.MessageParts, sAdjunto );
+  end
+  else
+    Adjunto := nil;
+
+  // Si ha conectado enviamos el mensaje y desconectamos
+  if SMTP.Connected then
+  begin
+    try
+      SMTP.Send( Mensaje );
+    except
+      raise Exception.Create( 'Error al enviar el mensaje.' );
+    end;
+
+
+  // Liberamos los objetos creados
+  if Adjunto <> nil then
+    FreeAndNil( Adjunto );
+
+  FreeAndNil( Mensaje );
+end;
+end;
+
+procedure TTSMTP.DesconectarSMTP;
+begin
+    try
+      SMTP.Disconnect;
+    except
+      raise Exception.Create( 'Error al desconectar del servidor.' );
+    end;
+
+  FreeAndNil( SMTP );
+
+  if (IdAntiFreeze <> Nil) then begin
+    IdAntiFreeze.Active := false;
+    FreeAndNil( IdAntiFreeze );
+  end;
+end;
+
+end.

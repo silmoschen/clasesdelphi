@@ -1,0 +1,533 @@
+unit CDebitosCreditosCentroBioq;
+
+interface
+
+uses SysUtils, DB, DBTables, CBDT, CIDBFM, CUtiles, CListar, CProfesionalCCB,
+     Contnrs;
+
+type
+
+TTDebitosCreditos = class(TObject)
+  Items, Idprof, Descrip, Categoria, Discriminacion, Per_inicio, Per_final: String; Importe, ImporteCat, MontoN, MontoD: Real;
+  tabla, debcredcateg, debitosindiv, meses: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Guardar(xitems, xDescrip: String; xImporte: Real);
+  procedure   Borrar(xitems: string); overload;
+  function    Buscar(xitems: string): boolean; overload;
+  procedure   getDatos(xitems: string); overload;
+  function    setItems: TQuery; overload;
+  function    Nuevo: String;
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; incluir_det: Boolean; salida: char);
+  procedure   BuscarPorDescrip(xexpr: string);
+  procedure   BuscarPorItems(xexpr: string);
+  procedure   FijarTipoDeDiscriminacion(xitems, xtipo: String);
+
+  { Tratamiento de los débitos y créditos por categorías }
+  procedure   GuardarDCCat(xitems, xcategoria: String; xImporte: Real);
+  procedure   Borrar(xitems, xcategoria: string); overload;
+  function    Buscar(xitems, xcategoria: string): boolean; overload;
+  procedure   getDatos(xitems, xcategoria: string); overload;
+
+  { Tratamiento de los débitos y Créditos por Profesional }
+  procedure   GuardarDCProf(xitems, xidprof, xper_inicio, xper_fin: String; xMonto, xMontoDif: Real);
+  procedure   BorrarDCProf(xitems, xidprof, xper_inicio: String);
+  function    setDCProf(xitems: String): TQuery;
+  function    BuscarDCProf(xitems, xidprof, xper_inicio: String): Boolean;
+  procedure   getDatosDCProf(xitems, xidprof, xper_inicio: String);
+  procedure   SincronizarDCProf(xitems, xidprof, xper_inicio: String);
+
+  { Tratamiento de los meses }
+  procedure   GuardarMes(xitems, xidprof: String; mes: array of String; xmonto: Real);
+  function    setMeses(xitems, xidprof: String): TQuery;
+  function    BuscarMes(xitems, xidprof, xmes: String): Boolean;
+  procedure   getDatosMes(xitems, xidprof, xmes: String);
+  procedure   BorrarMeses(xitems, xidprof: String);
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  conexiones: shortint;
+  DBConexion: String;
+  lista: TObjectList;
+  procedure   ListLinea(incluir_det: Boolean; salida: char);
+  procedure   listItems(salida: char);
+  { Declaraciones Privadas }
+end;
+
+function debitoscreditos: TTDebitosCreditos;
+
+implementation
+
+var
+  xcomprob: TTDebitosCreditos = nil;
+
+constructor TTDebitosCreditos.Create;
+begin
+  inherited Create;
+  if dbs.BaseClientServ = 'S' then DBConexion := dbs.baseDat else DBConexion := dbs.DirSistema + '\archdat';
+  tabla := datosdb.openDB('debcred', 'items',  '', DBConexion);
+  debcredcateg := datosdb.openDB('debcredcateg', '',  '', DBConexion);
+  debitosindiv := datosdb.openDB('debindividuales', '',  '', DBConexion);
+  meses        := datosdb.openDB('meses', '',  '', DBConexion);
+end;
+
+destructor TTDebitosCreditos.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTDebitosCreditos.Guardar(xItems, xDescrip: String; xImporte: Real);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xItems) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('Items').AsString   := xItems;
+  tabla.FieldByName('Descrip').AsString := xDescrip;
+  tabla.FieldByName('Importe').AsFloat  := xImporte;
+  try
+    tabla.Post
+  except
+    tabla.Cancel
+  end;
+end;
+
+procedure TTDebitosCreditos.Borrar(xItems: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xItems) then Begin
+    tabla.Delete;
+    getDatos(tabla.FieldByName('Items').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+    datosdb.tranSQL(debitosindiv.DatabaseName, 'DELETE FROM ' + debitosindiv.TableName + ' WHERE Items = ' + '"' + xitems + '"');
+    datosdb.tranSQL(debcredcateg.DatabaseName, 'DELETE FROM ' + debcredcateg.TableName + ' WHERE Items = ' + '"' + xitems + '"');
+    datosdb.refrescar(debitosindiv);
+    datosdb.refrescar(debcredcateg);
+  end;
+end;
+
+function TTDebitosCreditos.Buscar(xItems: string): Boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if tabla.IndexFieldNames <> 'Items' then tabla.IndexFieldNames := 'Items';
+  if tabla.FindKey([xitems]) then Result := True else Result := False;
+end;
+
+procedure  TTDebitosCreditos.getDatos(xitems: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  tabla.Refresh;
+  if Buscar(xitems) then Begin
+    items          := tabla.FieldByName('items').AsString;
+    descrip        := tabla.FieldByName('descrip').AsString;
+    importe        := tabla.FieldByName('importe').AsFloat;
+    Discriminacion := tabla.FieldByName('discrim').AsString;
+  end else Begin
+    items := ''; descrip := ''; importe := 0; Discriminacion := '';
+  end;
+end;
+
+function TTDebitosCreditos.setItems: TQuery;
+// Objetivo...: devolver un set con los items disponibles
+begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM ' + tabla.TableName + ' ORDER BY Discrim, Descrip');
+end;
+
+function TTDebitosCreditos.Nuevo: string;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if tabla.IndexFieldNames <> 'Items' then tabla.IndexFieldNames := 'Items';
+  tabla.Last;
+  if tabla.RecordCount = 0 then Result := '1' else Result := IntToStr(StrToInt(tabla.FieldByName('items').AsString) + 1);
+end;
+
+procedure TTDebitosCreditos.Listar(orden, iniciar, finalizar, ent_excl: string; incluir_det: Boolean; salida: char);
+// Objetivo...: Listar colección de objetos
+begin
+  if orden = 'A' then tabla.IndexName := tabla.IndexDefs.Items[1].Name else tabla.IndexFieldNames := 'Items';
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Tabla Débitos Créditos Profesionales', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  if not incluir_det then Begin
+    List.Titulo(0, 0, 'Items    Descripción', 1, 'Arial, cursiva, 8');
+    List.Titulo(84, 0, 'Importe Fijo', 2, 'Arial, cursiva, 8');
+  end else Begin
+    List.Titulo(0, 0, 'Items    Descripción/Profesional', 1, 'Arial, cursiva, 8');
+    List.Titulo(32, list.Lineactual, 'Lapso', 2, 'Arial, cursiva, 8');
+    List.Titulo(45, list.Lineactual, 'Monto Normal', 3, 'Arial, cursiva, 8');
+    List.Titulo(64, list.Lineactual, 'Monto Dif.', 4, 'Arial, cursiva, 8');
+    List.Titulo(73, list.Lineactual, 'Meses Apl. Monto Dif.', 5, 'Arial, cursiva, 8');
+  end;
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do Begin
+    // Ordenado por Código
+    if (ent_excl = 'E') and (orden = 'C') then
+      if (tabla.FieldByName('items').AsString >= iniciar) and (tabla.FieldByName('items').AsString <= finalizar) then ListLinea(incluir_det, salida);
+    if (ent_excl = 'X') and (orden = 'C') then
+      if (tabla.FieldByName('items').AsString < iniciar) or (tabla.FieldByName('items').AsString > finalizar) then ListLinea(incluir_det, salida);
+    // Ordenado Alfabéticamente
+    if (ent_excl = 'E') and (orden = 'A') then
+      if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then ListLinea(incluir_det, salida);
+    if (ent_excl = 'X') and (orden = 'A') then
+      if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then ListLinea(incluir_det, salida);
+
+    tabla.Next;
+  end;
+  List.FinList;
+
+  tabla.IndexFieldNames := tabla.IndexFieldNames;
+  tabla.First;
+end;
+
+procedure TTDebitosCreditos.ListLinea(incluir_det: Boolean; salida: char);
+// Objetivo...: Listar Linea de detalle
+var
+  f: String;
+begin
+  if incluir_det then f := 'Arial, negrita, 9' else f := 'Arial, normal, 8';
+  List.Linea(0, 0, tabla.FieldByName('items').AsString + '         ' + tabla.FieldByName('descrip').AsString, 1, f, salida, 'N');
+  List.importe(93, List.lineactual, '', tabla.FieldByName('importe').AsFloat, 2, f);
+  if Length(Trim(tabla.FieldByName('discrim').AsString)) = 0 then  List.Linea(94, list.lineactual, ' ', 3, f, salida, 'S') else Begin
+    if tabla.FieldByName('discrim').AsString = 'C' then List.Linea(94, list.lineactual, '(Cat)', 3, f, salida, 'S');
+    if tabla.FieldByName('discrim').AsString = 'I' then List.Linea(94, list.lineactual, '(Ind)', 3, f, salida, 'S');
+  end;
+  if incluir_det then listItems(salida);
+end;
+
+procedure TTDebitosCreditos.listItems(salida: char);
+// Objetivo...: Listar Items de detalle
+var
+  r, t: TQuery;
+  m: String;
+Begin
+  if Length(Trim(tabla.FieldByName('discrim').AsString)) > 0 then Begin
+    if tabla.FieldByName('discrim').AsString = 'C' then Begin   { Discriminación por categooría }
+      r := datosdb.tranSQL(DBConexion, 'SELECT * FROM debcredcateg WHERE items = ' + '"' + tabla.FieldByName('items').AsString + '"');
+      r.Open;
+      while not r.Eof do Begin
+        list.Linea(0, 0, '  ' + r.FieldByName('categoria').AsString, 1, 'Arial, normal, 8', salida, 'N');
+        list.Importe(55, list.Lineactual, '', r.FieldByName('importe').AsFloat, 2, 'Arial, normal, 8');
+        list.Linea(57, list.Lineactual, '', 3, 'Arial, normal, 8', salida, 'S');
+        r.Next;
+      end;
+      if r.RecordCount > 0 then list.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+      r.Close; r.Free;
+    end;
+
+    if tabla.FieldByName('discrim').AsString = 'I' then Begin   { Discriminación individual }
+      r := datosdb.tranSQL(DBConexion, 'SELECT * FROM debindividuales WHERE items = ' + '"' + tabla.FieldByName('items').AsString + '"' + ' ORDER BY idprof');
+      r.Open;
+      profesional.conectar;
+      while not r.Eof do Begin
+        m := ''; { Aislamos los meses que paga }
+        t := datosdb.tranSQL(DBConexion, 'SELECT * FROM meses WHERE items = ' + '"' + r.FieldByName('items').AsString + '"' + ' AND Idprof = ' + '"' + r.FieldByName('idprof').AsString + '"');
+        t.Open;
+        while not t.Eof do Begin
+          m := m + Copy(utiles.setMes(t.FieldByName('mes').AsInteger), 1, 1) + ' ';
+          t.Next;
+        end;
+        t.Close; t.Free;
+        profesional.getDatos(r.FieldByName('idprof').AsString);
+        list.Linea(0, 0, '  ' + r.FieldByName('idprof').AsString + ' ' + Copy(profesional.nombre, 1, 25), 1, 'Arial, normal, 8', salida, 'N');
+        if Length(Trim(r.FieldByName('per_inicio').AsString)) = 7 then list.Linea(30, list.Lineactual, r.FieldByName('per_inicio').AsString + '-' + r.FieldByName('per_final').AsString, 2, 'Arial, normal, 8', salida, 'N') else list.Linea(30, list.Lineactual, '', 2, 'Arial, normal, 8', salida, 'N');
+        list.Importe(55, list.Lineactual, '', r.FieldByName('monton').AsFloat, 3, 'Arial, normal, 8');
+        list.Importe(72, list.Lineactual, '', r.FieldByName('montod').AsFloat, 4, 'Arial, normal, 8');
+        list.Linea(73, list.Lineactual, m, 5, 'Arial, normal, 8', salida, 'S');
+        r.Next;
+      end;
+      profesional.desconectar;
+      if r.RecordCount > 0 then list.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+      r.Close; r.Free;
+    end;
+  end;
+end;
+
+procedure TTDebitosCreditos.BuscarPorDescrip(xexpr: string);
+// Objetivo...: Busqueda blanda por Descripcion
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTDebitosCreditos.BuscarPorItems(xexpr: string);
+// Objetivo...: Busqueda blanda por Items
+begin
+  tabla.IndexFieldNames := 'items';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTDebitosCreditos.FijarTipoDeDiscriminacion(xitems, xtipo: String);
+// Objetivo...: Fijar tipo de discriminacioon
+Begin
+  if Buscar(xitems) then Begin
+    tabla.Edit;
+    tabla.FieldByName('Discrim').AsString := xtipo;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.refrescar(tabla); 
+  end;
+end;
+
+procedure TTDebitosCreditos.GuardarDCCat(xitems, xcategoria: String; xImporte: Real);
+// Objetivo...: Guardar Retenciones por Catgegorias
+begin
+  if Buscar(xitems, xcategoria) then debcredcateg.Edit else debcredcateg.Append;
+  debcredcateg.FieldByName('items').AsString     := xitems;
+  debcredcateg.FieldByName('categoria').AsString := xcategoria;
+  debcredcateg.FieldByName('importe').AsFloat    := ximporte;
+  try
+    debcredcateg.Post
+   except
+    debcredcateg.Cancel
+  end;
+end;
+
+procedure TTDebitosCreditos.Borrar(xitems, xcategoria: string);
+// Objetivo...: Borrar una instancia
+begin
+  if Buscar(xitems, xcategoria) then debcredcateg.Delete;
+end;
+
+function  TTDebitosCreditos.Buscar(xitems, xcategoria: string): boolean;
+// Objetivo...: Buscar Ajuste
+begin
+  Result := datosdb.Buscar(debcredcateg, 'Items', 'Categoria', xitems, xcategoria);
+end;
+
+procedure TTDebitosCreditos.getDatos(xitems, xcategoria: string);
+// Objetivo...: Cargar una instancia de la clase
+Begin
+  if Buscar(xitems, xcategoria) then importeCat := debcredcateg.FieldByName('importe').AsFloat else importeCat := 0;
+end;
+
+procedure TTDebitosCreditos.GuardarDCProf(xitems, xidprof, xper_inicio, xper_fin: String; xMonto, xMontoDif: Real);
+// Objetivo...: Guardar los débitos por profesional
+Begin
+  if xmonto + xmontodif > 0 then Begin
+    //datosdb.tranSQL(DBConexion, 'DELETE FROM ' + debitosindiv.TableName + ' WHERE Items = ' + '"' + xitems + '"' + ' AND Idprof = ' + '"' + xidprof + '"');
+    //datosdb.closedb(debitosindiv); debitosindiv.Open;
+    if BuscarDCProf(xitems, xidprof, xper_inicio) then debitosindiv.Edit else debitosindiv.Append;
+    debitosindiv.FieldByName('items').AsString      := xitems;
+    debitosindiv.FieldByName('idprof').AsString     := xidprof;
+    debitosindiv.FieldByName('per_inicio').AsString := xper_inicio;
+    debitosindiv.FieldByName('per_final').AsString  := xper_fin;
+    debitosindiv.FieldByName('monton').AsFloat      := xmonto;
+    debitosindiv.FieldByName('montod').AsFloat      := xmontodif;
+    try
+      debitosindiv.Post
+     except
+      debitosindiv.Cancel
+    end;
+    datosdb.closedb(debitosindiv); debitosindiv.Open;
+  end;
+end;
+
+procedure TTDebitosCreditos.BorrarDCProf(xitems, xidprof, xper_inicio: String);
+// Objetivo...: Borrar Items
+Begin
+  if BuscarDCProf(xitems, xidprof, xper_inicio) then debitosindiv.Delete;
+  datosdb.tranSQL(DBConexion, 'DELETE FROM ' + debitosindiv.TableName + ' WHERE Items = ' + '"' + xitems + '"' + ' AND Idprof = ' + '"' + xidprof + '"' + ' AND per_inicio = ' + '"' + xper_inicio + '"');
+  datosdb.tranSQL(DBConexion, 'DELETE FROM ' + meses.TableName + ' WHERE Items = ' + '"' + xitems + '"' + ' AND Idprof = ' + '"' + xidprof + '"');
+  datosdb.refrescar(debitosindiv);
+end;
+
+function  TTDebitosCreditos.setDCProf(xitems: String): TQuery;
+// Objetivo...: Devolver los profesionales asociados al items
+Begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM ' + debitosindiv.TableName + ' WHERE items = ' + '"' + xitems + '"');
+end;
+
+function TTDebitosCreditos.BuscarDCProf(xitems, xidprof, xper_inicio: String): Boolean;
+// Objetivo...: Buscar Débitos/Créditos Profesionales
+begin
+  Result := datosdb.Buscar(debitosindiv, 'Items', 'Idprof', 'Per_inicio', xitems, xidprof, xper_inicio);
+end;
+
+procedure TTDebitosCreditos.getDatosDCProf(xitems, xidprof, xper_inicio: String);
+// Objetivo...: Recuperar Débitos/Créditos Profesionales
+begin
+  if BuscarDCProf(xitems, xidprof, xper_inicio) then Begin
+    montoN     := debitosindiv.FieldByName('montoN').AsFloat;
+    montoD     := debitosindiv.FieldByName('montoD').AsFloat;
+    per_inicio := debitosindiv.FieldByName('per_inicio').AsString;
+    per_final  := debitosindiv.FieldByName('per_final').AsString;
+  end else Begin
+    montoN := 0; montoD := 0; per_inicio := ''; per_final := '';
+  end;
+end;
+
+{procedure TTDebitosCreditos.SincronizarDCProf;
+// Objetivo...: Armar una lista con Débitos/Créditos Profesionales
+var
+  objeto: TTDebitosCreditos;
+begin
+  lista := TObjectList.Create;
+  if not debitosindiv.Active then debitosindiv.Open;
+  debitosindiv.First;
+  while not debitosindiv.Eof do Begin
+    objeto := TTDebitosCreditos.Create;
+    objeto.Items      := debitosindiv.FieldByName('items').AsString;
+    objeto.Idprof     := debitosindiv.FieldByName('idprof').AsString;
+    objeto.Per_inicio := debitosindiv.FieldByName('per_inicio').AsString;
+    objeto.Per_final  := debitosindiv.FieldByName('per_final').AsString;
+    objeto.MontoN     := debitosindiv.FieldByName('montoN').AsFloat;
+    objeto.montoD     := debitosindiv.FieldByName('montoD').AsFloat;
+    lista.Add(objeto);
+    debitosindiv.Next;
+  end;
+end;}
+
+procedure TTDebitosCreditos.SincronizarDCProf(xitems, xidprof, xper_inicio: String);
+// Objetivo...: Recuperar Débitos/Créditos Profesionales
+var
+  i: Integer;
+  l: Boolean;
+  objeto: TTDebitosCreditos;
+begin
+  montoN := 0; montoD := 0; per_inicio := ''; per_final := '';
+  if not debitosindiv.Active then debitosindiv.Open;
+  datosdb.Filtrar(debitosindiv, 'items = ' + '''' + xitems + '''' + ' and idprof = ' + '''' + xidprof + '''');
+  debitosindiv.First;
+  while not debitosindiv.Eof do Begin
+    l := False;
+
+    if Length(Trim(debitosindiv.FieldByName('per_inicio').AsString)) < 7 then l := True;
+
+    if not l then Begin
+      if (Copy(xper_inicio, 4, 4) + Copy(xper_inicio, 1, 2) >= Copy(debitosindiv.FieldByName('per_inicio').AsString, 4, 4) + Copy(debitosindiv.FieldByName('per_inicio').AsString, 1, 2)) and
+         (Copy(xper_inicio, 4, 4) + Copy(xper_inicio, 1, 2) <= Copy(debitosindiv.FieldByName('per_final').AsString, 4, 4) + Copy(debitosindiv.FieldByName('per_final').AsString, 1, 2)) then l := True;
+    end;
+
+    if l then Begin
+      montoN     := debitosindiv.FieldByName('montoN').AsFloat;
+      montoD     := debitosindiv.FieldByName('montoD').AsFloat;
+      per_inicio := debitosindiv.FieldByName('per_inicio').AsString;
+      per_final  := debitosindiv.FieldByName('per_final').AsString;
+      Break;
+    end;
+    debitosindiv.Next;
+  end;
+  datosdb.QuitarFiltro(debitosindiv);
+
+  {if lista = Nil then SincronizarDCProf;   // Lista Dinámica -> 09/11/2007
+
+  montoN := 0; montoD := 0; per_inicio := ''; per_final := '';
+  for i := 1 to lista.Count do Begin
+    objeto := TTDebitosCreditos(lista.Items[i-1]);
+    if (objeto.Items = xitems) and (objeto.Idprof = xidprof) then Begin
+      l := False;
+
+      if Length(Trim(objeto.Per_inicio)) < 7 then l := True;
+
+    if not l then Begin
+      if (Copy(xper_inicio, 4, 4) + Copy(xper_inicio, 1, 2) >= Copy(objeto.Per_inicio, 4, 4) + Copy(objeto.Per_inicio, 1, 2)) and
+         (Copy(xper_inicio, 4, 4) + Copy(xper_inicio, 1, 2) <= Copy(objeto.Per_inicio, 4, 4) + Copy(objeto.Per_inicio, 1, 2)) then l := True;
+      end;
+
+      if l then Begin
+        montoN     := objeto.MontoN;
+        montoD     := objeto.MontoD;
+        per_inicio := objeto.Per_inicio;
+        per_final  := objeto.Per_final;
+        Break;
+      end;
+    end;
+  end;}
+end;
+
+procedure TTDebitosCreditos.GuardarMes(xitems, xidprof: String; mes: array of String; xmonto: Real);
+// Objetivo...: Guardar meses
+var
+  i: Integer;
+Begin
+  datosdb.tranSQL(DBConexion, 'DELETE FROM ' + meses.TableName + ' WHERE items = ' + '"' + xitems + '"' + ' AND idprof = ' + '"' + xidprof + '"');
+  if Length(Trim(mes[Low(mes)])) > 0 then
+    For i := Low(mes) to High(mes) do Begin
+      if Length(Trim(mes[i])) = 0 then Break;
+      meses.Append;
+      meses.FieldByName('items').AsString  := xitems;
+      meses.FieldByName('idprof').AsString := xidprof;
+      meses.FieldByName('mes').AsString    := mes[i];
+      meses.FieldByName('monto').AsFloat   := xmonto;
+      try
+        meses.Post
+       except
+        meses.Cancel
+      end;
+    end;
+end;
+
+function  TTDebitosCreditos.setMeses(xitems, xidprof: String): TQuery;
+// Objetivo...: Retornar set de meses
+Begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM meses WHERE idprof = ' + '"' + xidprof + '"' + ' AND items = ' + '"' + xitems + '"');
+end;
+
+function  TTDebitosCreditos.BuscarMes(xitems, xidprof, xmes: String): Boolean;
+// Objetivo...: Verificar la existencia de un mes
+Begin
+  Result := datosdb.Buscar(meses, 'Items', 'Idprof', 'Mes', xitems, xidprof, xmes);
+end;
+
+procedure TTDebitosCreditos.getDatosMes(xitems, xidprof, xmes: String);
+// Objetivo...: Obtener monto diferencial
+Begin
+  if BuscarMes(xitems, xidprof, xmes) then MontoD := meses.FieldByName('monto').AsFloat else MontoD := 0;
+end;
+
+procedure TTDebitosCreditos.BorrarMeses(xitems, xidprof: String);
+// Objetivo...: Dar de bajas meses para un determinado items
+Begin
+  datosdb.tranSQL(DBConexion, 'DELETE FROM meses WHERE idprof = ' + '"' + xidprof + '"' + ' AND items = ' + '"' + xitems + '"');
+end;
+
+procedure TTDebitosCreditos.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    if not debcredcateg.Active then debcredcateg.Open;
+    if not debitosindiv.Active then debitosindiv.Open;
+    if not meses.Active then meses.Open;
+    tabla.FieldByName('items').DisplayLabel := 'Items'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('importe').DisplayLabel := 'Monto Fijo'; tabla.FieldByName('discrim').DisplayLabel := 'D';
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTDebitosCreditos.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    datosdb.closeDB(debcredcateg);
+    datosdb.closeDB(debitosindiv);
+    datosdb.closeDB(meses);
+  end;
+end;
+
+{===============================================================================}
+
+function debitoscreditos: TTDebitosCreditos;
+begin
+  if xcomprob = nil then
+    xcomprob := TTDebitosCreditos.Create;
+  Result := xcomprob;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xcomprob.Free;
+
+end.

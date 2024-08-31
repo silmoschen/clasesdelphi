@@ -1,0 +1,440 @@
+unit CUtilidadesStringGrid;
+
+interface
+
+uses SysUtils, CUtiles, Grids, Forms, CListar, Classes;
+
+type
+  TTUtilidadesGrid = class
+    constructor Create;
+    destructor  Destroy; override;
+
+    procedure   BorrarRenglon(SG: TStringGrid);
+    procedure   BorrarRenglon_SinRenumerar(SG: TStringGrid);
+    procedure   InsertarLinea(SG: TStringGrid); overload;
+    procedure   InsertarLinea(SG: TStringGrid; CantidadDeCerosAlaIzquierdaParaRenumerarItems: ShortInt); overload;
+    procedure   IniciarGrilla(SG: TStringGrid); overload;
+    procedure   IniciarGrilla(SG: TStringGrid; colInicio: Integer); overload;
+    procedure   IniciarGrilla(SG: TStringGrid; colInicio, colFinal: Integer); overload;
+    procedure   IniciarGrilla_Total(SG: TStringGrid);
+    procedure   InsertarLineasSinRenumerar(SG: TStringGrid);
+    procedure   RegenerarItems(SG: TStringGrid); overload;
+    procedure   RegenerarItems(SG: TStringGrid; CantidadDeCerosAlaIzquierda: ShortInt; CantidadDeItems: Integer); overload;
+    procedure   RegenerarItems(SG: TStringGrid; CantidadDeCerosAlaIzquierda: ShortInt); overload;
+    procedure   EstablecerValoresPredeterminados(SG: TStringGrid; valor: String; ColInicio: Integer);
+    function    BuscarExpresionEnColumna(SG: TStringGrid; Valor: String; Columna: Integer): Boolean;
+    procedure   GuardarAnchoColumnas(xform: TForm; xgrid: TStringGrid);
+    procedure   RecuperarAnchoColumnas(xform: TForm; xgrid: TStringGrid);
+    procedure   BorrarColumna(SG: TStringGrid);
+    procedure   Sortgrid(Grid : TStringGrid; SortCol:integer; by: byte);
+
+    procedure   ListarGrillaF1(xtitulo: String; xsubtitulo: TStringList; xgrid: TStringGrid; xorientacion: String; salida: char);
+    procedure   ListarGrillaF2(xtitulo: String; xsubtitulo: TStringList; xgrid: TStringGrid; xorientacion: String; salida: char);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  Grid: TTUtilidadesGrid;
+
+implementation
+
+var
+  xutilesgrid: TTUtilidadesGrid = nil;
+
+constructor TTUtilidadesGrid.Create;
+Begin
+  inherited Create;
+end;
+
+destructor  TTUtilidadesGrid.Destroy;
+Begin
+  inherited Destroy;
+end;
+
+procedure TTUtilidadesGrid.IniciarGrilla(SG: TStringGrid);
+// Objetivo...: Iniciar StringGrid
+var
+  j, c: Integer;
+begin
+  For j := 1 to SG.RowCount do Begin
+    if Length(Trim(SG.Cells[0, j])) = 0  then Break;
+    For c := 1 to SG.ColCount do SG.Cells[c-1, j] := '';
+  end;
+  SG.Row := 1; if SG.ColCount > 1 then SG.Col := 1;
+end;
+
+procedure TTUtilidadesGrid.IniciarGrilla_Total(SG: TStringGrid);
+// Objetivo...: Iniciar StringGrid
+var
+  j, c: Integer;
+begin
+  For j := 1 to SG.RowCount do
+    For c := 1 to SG.ColCount do SG.Cells[c-1, j] := '';
+  SG.Row := 1; if SG.ColCount > 1 then SG.Col := 1;
+end;
+
+procedure TTUtilidadesGrid.IniciarGrilla(SG: TStringGrid; colInicio: Integer);
+// Objetivo...: Iniciar datos desde la columna especificada
+var
+  j, c, f: Integer;
+begin
+  f := SG.FixedCols;
+  SG.FixedCols := 0;
+  For j := 1 to SG.RowCount do Begin
+    if Length(Trim(SG.Cells[0, j])) = 0 then Break;
+    For c := colInicio + 1 to SG.ColCount do SG.Cells[c-1, j] := '';
+  end;
+  SG.Row := 1; SG.Col := 1;
+  SG.FixedCols := f;
+end;
+
+procedure TTUtilidadesGrid.IniciarGrilla(SG: TStringGrid; colInicio, colFinal: Integer);
+// Objetivo...: Iniciar datos desde la columna especificada
+var
+  j, c, f: Integer;
+begin
+  f := SG.FixedCols;
+  SG.FixedCols := 0;
+  For j := 1 to SG.RowCount do Begin
+    if Length(Trim(SG.Cells[0, j])) = 0 then Break;
+    For c := colInicio + 1 to colFinal - 1 do SG.Cells[c-1, j] := '';
+  end;
+  SG.Row := 1; SG.Col := 1;
+  SG.FixedCols := f;
+end;
+
+procedure TTUtilidadesGrid.BorrarRenglon(SG: TStringGrid);
+//Objetivo...: Eliminar una Linea de detalle de la Factura
+var
+  i, x: integer;
+begin
+  //Quitamos el Renglon Seleccionado
+  For i := SG.row to SG.RowCount do
+    //Subimos un Renglon para Recortar el Eliminado
+    if Length(Trim(SG.cells[0, i])) > 0 then For x := 1 to SG.ColCount do SG.cells[x - 1, i] := SG.cells[x - 1, i + 1];
+  RegenerarItems(SG);
+end;
+
+procedure TTUtilidadesGrid.BorrarRenglon_SinRenumerar(SG: TStringGrid);
+//Objetivo...: Eliminar una Linea de detalle de la Factura
+var
+  i, x: integer;
+begin
+  //Quitamos el Renglon Seleccionado
+  For i := SG.row to SG.RowCount do
+    //Subimos un Renglon para Recortar el Eliminado
+    if Length(Trim(SG.cells[0, i])) + Length(Trim(SG.cells[1, i])) > 0 then For x := 1 to SG.ColCount do SG.cells[x - 1, i] := SG.cells[x - 1, i + 1];
+end;
+
+procedure TTUtilidadesGrid.InsertarLinea(SG: TStringGrid);
+// Objetivo...: Insertar un movimiento en el Asiento
+var
+  i, x, t: integer;
+begin
+  x := SG.RowCount;
+  t := SG.row;
+  while x > t do Begin
+    //Subimos un Renglon para Recortar el Eliminado
+    For i := 1 to SG.ColCount do SG.cells[i - 1, x] := SG.cells[i - 1, x - 1];
+    SG.cells[i - 1, x] := utiles.sLlenarIzquierda(IntToStr(SG.row - 1), 3, '0');
+    Dec(x);
+  end;
+  For x := 1 to SG.ColCount do SG.cells[x - 1, SG.row] := '  ';
+  RegenerarItems(SG);
+end;
+
+procedure TTUtilidadesGrid.InsertarLinea(SG: TStringGrid; CantidadDeCerosAlaIzquierdaParaRenumerarItems: ShortInt);
+// Objetivo...: Renumerar Items y completar items con los ceros indicados en el segundo parametro
+Begin
+  InsertarLinea(SG);
+  RegenerarItems(SG, CantidadDeCerosAlaIzquierdaParaRenumerarItems);
+end;
+
+procedure TTUtilidadesGrid.InsertarLineasSinRenumerar(SG: TStringGrid);
+// Objetivo...: Insertar un movimiento en el Asiento
+var
+  i, x, t: integer;
+begin
+  x := SG.RowCount;
+  t := SG.row;
+  while x > t do Begin
+    //Subimos un Renglon para Recortar el Eliminado
+    For i := 1 to SG.ColCount do SG.cells[i - 1, x] := SG.cells[i - 1, x - 1];
+    SG.cells[i - 1, x] := utiles.sLlenarIzquierda(IntToStr(SG.row - 1), 3, '0');
+    Dec(x);
+  end;
+  For x := 1 to SG.ColCount do SG.cells[x - 1, SG.row] := '  ';
+end;
+
+procedure TTUtilidadesGrid.RegenerarItems(SG: TStringGrid);
+var
+  i: Integer;
+Begin
+  For i := 1 to SG.RowCount do Begin
+    if Length(Trim(SG.Cells[1, i])) = 0 then Break;
+    SG.Cells[0, i] := IntToStr(i);
+  end;
+end;
+
+procedure TTUtilidadesGrid.RegenerarItems(SG: TStringGrid; CantidadDeCerosAlaIzquierda: ShortInt; CantidadDeItems: Integer);
+var
+  i: Integer;
+Begin
+  For i := SG.Row to CantidadDeItems do SG.Cells[0, i] := utiles.sLlenarIzquierda(IntToStr(i), CantidadDeCerosAlaIzquierda, '0');
+end;
+
+procedure TTUtilidadesGrid.RegenerarItems(SG: TStringGrid; CantidadDeCerosAlaIzquierda: ShortInt);
+var
+  i: Integer; f: Boolean;
+Begin
+  f := False;
+  For i := SG.RowCount downto 1 do Begin
+    if Length(Trim(SG.Cells[0, i])) > 0 then f := True;
+    if f then SG.Cells[0, i] := utiles.sLlenarIzquierda(IntToStr(i), CantidadDeCerosAlaIzquierda, '0');
+  end;
+end;
+
+procedure TTUtilidadesGrid.EstablecerValoresPredeterminados(SG: TStringGrid; valor: String; ColInicio: Integer);
+var
+  i, j: Integer;
+Begin
+  For i := 1 to SG.RowCount do
+    For j := ColInicio to SG.ColCount do SG.Cells[j, i] := valor;
+end;
+
+function  TTUtilidadesGrid.BuscarExpresionEnColumna(SG: TStringGrid; Valor: String; Columna: Integer): Boolean;
+// Objetivo...: Buscar en columna
+var
+  i: Integer;
+Begin
+  Result := False;
+  For i := 1 to SG.RowCount do Begin
+    if Length(Trim(SG.Cells[0, i])) = 0 then Break;
+    if SG.Cells[Columna, i] = Valor then Begin
+      Result := True;
+      Break;
+    end;
+  end;
+end;
+
+procedure TTUtilidadesGrid.GuardarAnchoColumnas(xform: TForm; xgrid: TStringGrid);
+// Objetivo...: Guardar los anchos de las columnas
+var
+  na: String;
+  i: Integer;
+  arch: TextFile;
+Begin
+  na := Trim(Copy(ExtractFilePath(Application.ExeName), 1, Length(ExtractFilePath(Application.ExeName))-1) + '\' + xform.Name + '_' + xgrid.Name + '.ini');
+  AssignFile(arch, na);
+  rewrite(arch);
+  For i := 1 to xgrid.RowCount do WriteLn(arch, xgrid.ColWidths[i-1]);
+  closeFile(arch);
+end;
+
+procedure TTUtilidadesGrid.RecuperarAnchoColumnas(xform: TForm; xgrid: TStringGrid);
+// Objetivo...: Recuperar los anchos de columnas
+var
+  na: String;
+  i, j: Integer;
+  arch: TextFile;
+Begin
+  na := Trim(Copy(ExtractFilePath(Application.ExeName), 1, Length(ExtractFilePath(Application.ExeName))-1) + '\' + xform.Name + '_' + xgrid.Name + '.ini');
+  if FileExists(na) then Begin
+    AssignFile(arch, na);
+    reset(arch); i := 0;
+    while not Eof(arch) do Begin
+      ReadLn(arch, j);
+      if i < xgrid.ColCount then xgrid.ColWidths[i] := j;
+      Inc(i);
+    end;
+    closeFile(arch);
+  end;
+end;
+
+procedure TTUtilidadesGrid.BorrarColumna(SG: TStringGrid);
+//Objetivo...: Eliminar una Columna
+var
+  i, x, j: integer;
+begin
+  For i := SG.Col to SG.ColCount do Begin
+    if Length(Trim(SG.Cells[i, 0])) = 0 then Break;
+    For x := 0 to SG.RowCount do SG.Cells[i, x] := SG.Cells[i+1, x];
+  end;
+end;
+
+procedure TTUtilidadesGrid.Sortgrid(Grid : TStringGrid; SortCol:integer; by: byte);
+var
+i,j, filas, tmpfilas: Integer;
+temp : TStringList;
+begin
+ utiles.msgError('s');
+tmpfilas := Grid.RowCount;
+
+for i := 1 to Grid.RowCount do begin
+  if (length(trim(Grid.Cells[0, i] + Grid.Cells[1, i] + Grid.Cells[2, i])) > 0) then inc(filas) else break;
+end;
+
+Grid.RowCount := filas;
+
+Temp:= TStringList.Create;
+with Grid
+do begin
+for i := FixedRows to RowCount - 2 do
+begin
+for j:= i+1 to rowcount-1 do
+begin
+if (by=0) then // ascendente
+begin
+if AnsiCompareText(Cells[SortCol,i], Cells[SortCol,j]) < 0
+then
+begin
+temp.assign(rows[j]);
+rows[j].assign(rows[i]);
+rows[i].assign(temp);
+end;
+end
+else // descendente
+begin
+if AnsiCompareText(Cells[SortCol,i], Cells[SortCol,j]) > 0 then
+begin
+ temp.assign(rows[j]);
+ rows[j].assign(rows[i]);
+ rows[i].assign(temp);
+end;
+end;
+end;
+end;
+end;
+temp.free;
+
+Grid.RowCount := tmpfilas;
+
+end;
+
+procedure TTUtilidadesGrid.ListarGrillaF1(xtitulo: String; xsubtitulo: TStringList; xgrid: TStringGrid; xorientacion: String; salida: char);
+//Objetivo...: Generar un Reporte a Partir de un StrinGrid
+var
+  i, j, x, cantitems, columnas: integer;
+  lista: TStringList;
+begin
+  if xorientacion = 'H' then list.ImprimirHorizontal;
+  lista := TStringList.Create;
+
+  list.Setear(salida);
+
+  list.Titulo(0, 0, '', 1, 'Arial, normal, 14');
+  if xsubtitulo <> Nil then Begin
+    for i := 1 to xsubtitulo.Count do
+      list.Titulo(0, 0, xsubtitulo.Strings[i-1], 1, 'Arial, normal, 9');
+    list.Titulo(0, 0, '', 1, 'Arial, normal, 5');
+  end;
+
+  if Length(Trim(xtitulo)) > 0 then Begin
+    list.Titulo(0, 0, xtitulo, 1, 'Arial, negrita, 14');
+    list.Titulo(0, 0, '', 1, 'Arial, normal, 8');
+  end;
+
+  for i := 1 to xgrid.RowCount do Begin
+    if (Length(Trim(xgrid.Cells[0, i-1])) + Length(Trim(xgrid.Cells[1, i-1])) > 0) then cantitems := i;
+  end;
+
+  x := 0;
+  For i := 1 to xgrid.ColCount do Begin
+    if Length(Trim(xgrid.Cells[i-1, 0])) > 0 then Begin
+    columnas := i;
+    if i = 1 then list.Titulo(0, 0, xgrid.Cells[i-1, 0], i, 'Arial, cursiva, 8') else Begin
+      x := x + xgrid.ColWidths[i-2] div 8;
+      lista.Add(IntToStr(x));
+      list.Titulo(x, list.Lineactual, xgrid.Cells[i-1, 0], i, 'Arial, cursiva, 8');
+    end;
+    end;
+  end;
+
+  list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+  list.Titulo(0, 0, '', 1, 'Arial, normal, 5');
+
+
+  For i := 1 to cantitems do Begin
+    x := 0;
+    for j := 1 to columnas do Begin
+      if j = 1 then list.Linea(0, 0, xgrid.Cells[j-1, i], j, 'Arial, normal, 8', salida, 'N') else Begin
+        x := StrToInt(lista.Strings[j-2]);
+        list.Linea(x, list.Lineactual, xgrid.Cells[j-1, i], j, 'Arial, normal, 8', salida, 'N');
+      end;
+    end;
+    list.Linea(95, list.Lineactual, '', j+1, 'Arial, normal, 8', salida, 'S');
+  end;
+
+  list.FinList;
+end;
+
+procedure TTUtilidadesGrid.ListarGrillaF2(xtitulo: String; xsubtitulo: TStringList; xgrid: TStringGrid; xorientacion: String; salida: char);
+//Objetivo...: Generar un Reporte a Partir de un StrinGrid
+var
+  i, j, x, cantitems, columnas: integer;
+  lista: TStringList;
+begin
+  if xorientacion = 'H' then list.ImprimirHorizontal;
+  lista := TStringList.Create;
+
+  list.Setear(salida);
+  if Length(Trim(xtitulo)) > 0 then Begin
+    list.Titulo(0, 0, '', 1, 'Arial, normal, 14');
+    list.Titulo(0, 0, xtitulo, 1, 'Arial, negrita, 14');
+    list.Titulo(0, 0, '', 1, 'Arial, normal, 8');
+  end;
+
+  for i := 1 to xgrid.RowCount do Begin
+    if (Length(Trim(xgrid.Cells[0, i-1])) + Length(Trim(xgrid.Cells[1, i-1])) > 0) then cantitems := i;
+  end;
+
+  x := 0;
+  For i := 1 to xgrid.ColCount do Begin
+    if Length(Trim(xgrid.Cells[i-1, 0])) > 0 then Begin
+    columnas := i;
+    if i = 1 then list.Titulo(0, 0, xgrid.Cells[i-1, 0], i, 'Arial, cursiva, 8') else Begin
+      x := x + xgrid.ColWidths[i-2] div 8;
+      lista.Add(IntToStr(x));
+      list.Titulo(x, list.Lineactual, xgrid.Cells[i-1, 0], i, 'Arial, cursiva, 8');
+    end;
+    end;
+  end;
+
+  list.Titulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
+  list.Titulo(0, 0, '', 1, 'Arial, normal, 5');
+
+  For i := 1 to cantitems do Begin
+    x := 0;
+    for j := 1 to columnas do Begin
+      if j = 1 then list.Linea(0, 0, xgrid.Cells[j-1, i], j, 'Arial, normal, 8', salida, 'N') else Begin
+        x := StrToInt(lista.Strings[j-2]);
+        list.Linea(x, list.Lineactual, xgrid.Cells[j-1, i], j, 'Arial, normal, 8', salida, 'N');
+      end;
+    end;
+    list.Linea(95, list.Lineactual, '', j+1, 'Arial, normal, 8', salida, 'S');
+    list.Linea(0, 0, list.Linealargopagina('--', salida), 1, 'Arial, normal, 10', salida, 'S');
+  end;
+
+  list.FinList;
+end;
+
+{===============================================================================}
+
+function utilesarchivos: TTUtilidadesGrid;
+begin
+  if xutilesgrid = nil then
+    xutilesgrid := TTUtilidadesGrid.Create;
+  Result := xutilesgrid;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xutilesgrid.Free;
+
+end.

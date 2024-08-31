@@ -1,0 +1,501 @@
+unit CPacienteCCB;
+
+interface
+
+uses CProfesionalCCB, CBDT, SysUtils, DB, DBTables, CUtiles, CListar, CIDBFM, Forms,
+     Classes;
+
+type
+
+TTPaciente = class
+  Idprof, Codpac, Nombre, Nrodoc, directorio, Gravadoiva: string;
+  Existe: Boolean;
+  tpaciente: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xidprof, xcodigo: string): boolean;
+  procedure   Grabar(xidprof, xcodigo, xnombre, xnrodoc, xgravadoiva: string);
+  procedure   Borrar;
+  procedure   getDatos(xidprof, xcodigo: string);
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  function    Nuevo(xidprof: string): string;
+
+  function    BuscarPorNroDocumento(xnrodoc: String): Boolean; overload;
+  function    BuscarPorNroDocumento(xidprof, xnrodoc: String): Boolean; overload;
+
+  procedure   BuscarPorCodigo(xidprof, xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+  procedure   BuscarPorNrodoc(xexpr: string);
+  procedure   Filtrar(xidprof: string);
+  procedure   DesactivarFiltro;
+
+  procedure   IniciarExportacion(xidprof: String);
+  procedure   MarcarPacienteAExportar(xidprof, xcodpac: String);
+  procedure   Exportar(xperiodo: String; xExportarTodos: Boolean);
+  procedure   TransferenciaFinal(xlaboratorio: String);
+
+  procedure   Importar(xidprof, xdirectorio: String; xlista: TStringList);
+
+  procedure   SeleccionarLaboratorio(xdirectorio: string);
+
+  procedure   setNombresCols;
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint; espacios: shortint; idprofant, dbconexion, diranter: string;
+  procedure   List_linea(salida: char);
+  procedure   List_Tit(salida: char);
+  procedure   verificarEstructura(xtabla: TTable; xdirectorio: String);
+end;
+
+function paciente: TTPaciente;
+
+implementation
+
+var
+  xpaciente: TTPaciente = nil;
+
+constructor TTPaciente.Create;
+begin
+  if (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccb.exe') or                  // Motor de Persitencia para las versiones de Laboratorios Cliente-Servidor
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbc.exe') or
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbcretivac.exe') or
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbcretiva.exe') then Begin   // Motor de Persitencia para las versiones de Laboratorios
+    if dbs.BaseClientServ = 'N' then DBConexion := dbs.DirSistema + '\archdat' else DBConexion := dbs.TDB1.DatabaseName;
+  end else Begin
+    if dbs.BaseClientServ = 'N' then DBConexion := dbs.DirSistema + '\archdat' else DBConexion := dbs.baseDat;
+  end;
+  tpaciente := datosdb.openDB('paciente', '', '', dbconexion);
+  //utiles.msgError(tpaciente.DatabaseName);
+end;
+
+destructor TTPaciente.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTPaciente.Buscar(xidprof, xcodigo: string): boolean;
+// Objetivo...: Buscar una instancia
+begin
+  if tpaciente.IndexFieldNames <> 'Idprof;Codpac' then tpaciente.IndexFieldNames := 'Idprof;Codpac';
+  Existe := false;
+  Existe := datosdb.Buscar(tpaciente, 'Idprof', 'Codpac', xidprof, xcodigo);
+  Result := Existe;
+end;
+
+procedure TTPaciente.Grabar(xidprof, xcodigo, xnombre, xnrodoc, xgravadoiva: string);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  if Buscar(xidprof, xcodigo) then tpaciente.Edit else tpaciente.Append;
+  tpaciente.FieldByName('idprof').AsString     := xidprof;
+  tpaciente.FieldByName('codpac').AsString     := xcodigo;
+  tpaciente.FieldByName('nombre').AsString     := TrimLeft(xnombre);
+  if datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc') then tpaciente.FieldByName('nrodoc').AsString := TrimLeft(xnrodoc);
+  tpaciente.FieldByName('alta').AsString       := utiles.sExprFecha(utiles.setFechaActual);
+  tpaciente.FieldByName('gravadoiva').AsString := xgravadoiva;
+  try
+    tpaciente.Post
+  except
+    tpaciente.Cancel
+  end;
+  datosdb.refrescar(tpaciente);
+end;
+
+procedure TTPaciente.Borrar;
+// Objetivo...: Eliminar una instancia
+begin
+  tpaciente.Delete;
+  getDatos(tpaciente.FieldByName('idprof').AsString, tpaciente.FieldByName('codpac').AsString);
+end;
+
+procedure TTPaciente.getDatos(xidprof, xcodigo: string);
+// Objetivo...: Cargar/iniciar los atributos para una instancia
+begin
+  //DesactivarFiltro;
+  if Buscar(xidprof, xcodigo) then Begin
+    idprof     := tpaciente.FieldByName('idprof').AsString;
+    codpac     := tpaciente.FieldByName('codpac').AsString;
+    nombre     := tpaciente.FieldByName('nombre').AsString;
+    gravadoiva := tpaciente.FieldByName('gravadoiva').AsString;
+    if datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc') then nrodoc := tpaciente.FieldByName('nrodoc').AsString;
+  end else Begin
+    idprof := ''; codpac := ''; nombre := ''; nrodoc := ''; gravadoiva := 'N';
+  end;
+  //Filtrar(xidprof);
+end;
+
+procedure TTPaciente.IniciarExportacion(xidprof: String);
+// Objetivo...: Exportar Pacientes
+Begin
+  {if dbs.BaseClientServ = 'N' then datosdb.tranSQL(dbs.DirSistema + '\archdat', 'update paciente set exportar = ' + '"' + 'N' + '"' + ' where idprof = ' + '"' + xidprof + '"');
+  if dbs.BaseClientServ = 'S' then datosdb.tranSQL(dbs.baseDat, 'update paciente set exportar = ' + '"' + 'N' + '"' + ' where idprof = ' + '"' + xidprof + '"');}
+  datosdb.tranSQL(dbconexion, 'update paciente set exportar = ' + '"' + 'N' + '"' + ' where idprof = ' + '"' + xidprof + '"');
+end;
+
+procedure TTPaciente.MarcarPacienteAExportar(xidprof, xcodpac: String);
+// Objetivo...: Exportar Pacientes
+var
+  estfilt: Boolean;
+Begin
+  estfilt := tpaciente.Filtered;
+  datosdb.QuitarFiltro(tpaciente);
+  if Buscar(xidprof, xcodpac) then Begin
+    tpaciente.Edit;
+    tpaciente.FieldByName('exportar').AsString := 'S';
+    try
+      tpaciente.Post
+     except
+      tpaciente.Cancel
+    end;
+    datosdb.refrescar(tpaciente);
+  end;
+  tpaciente.Filtered := estfilt;
+end;
+
+procedure TTPaciente.Exportar(xperiodo: String; xExportarTodos: Boolean);
+// Objetivo...: Exportar Pacientes
+var
+  pac: TTable;
+  exporta, b, c: Boolean;
+begin
+  conectar;
+  // Instanciamos las tablas a usar
+  pac := datosdb.openDB('paciente', 'Idprof;Codpac', '', dbs.DirSistema + '\exportar');
+  verificarEstructura(pac, dbs.DirSistema + '\exportar');
+  // Vaciamos el contenido
+  datosdb.tranSQL(dbs.DirSistema + '\exportar', 'DELETE FROM paciente');
+   // Copiamos los datos a exportar
+  tpaciente.First; pac.Open;
+  b := datosdb.verificarSiExisteCampo(pac, 'nrodoc');
+  c := datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc');
+  while not tpaciente.EOF do Begin
+    exporta := False;
+    if (tpaciente.FieldByName('exportar').AsString = 'S') or (tpaciente.FieldByName('alta').AsString >= utiles.sExprFecha('01/' + xperiodo)) and (tpaciente.FieldByName('alta').AsString <= utiles.sExprFecha(utiles.ultimodiames(Copy(xperiodo, 1, 2), Copy(xperiodo, 4, 4)) + '/' + xperiodo)) then exporta := True;
+    if xExportarTodos then
+      if (tpaciente.FieldByName('gravadoiva').AsString = 'S') or (tpaciente.FieldByName('gravadoiva').AsString = 'N') then exporta := True;
+    if exporta then Begin
+      if datosdb.Buscar(pac, 'idprof', 'codpac', tpaciente.FieldByName('idprof').AsString, tpaciente.FieldByName('codpac').AsString) then pac.Edit else pac.Append;
+      pac.FieldByName('idprof').AsString     := tpaciente.FieldByName('idprof').AsString;
+      pac.FieldByName('codpac').AsString     := tpaciente.FieldByName('codpac').AsString;
+      pac.FieldByName('nombre').AsString     := tpaciente.FieldByName('nombre').AsString;
+      pac.FieldByName('alta').AsString       := tpaciente.FieldByName('alta').AsString;
+      if (b) and (c) then pac.FieldByName('nrodoc').AsString := tpaciente.FieldByName('nrodoc').AsString;
+      pac.FieldByName('gravadoiva').AsString := tpaciente.FieldByName('gravadoiva').AsString;
+      try
+        pac.Post
+       except
+        pac.Cancel
+      end;
+    end;
+    tpaciente.Next;
+  end;
+  pac.Close; pac.Destroy;
+  desconectar;
+end;
+
+procedure TTPaciente.TransferenciaFinal(xlaboratorio: String);
+// Objetivo...: Exportar Pacientes
+var
+  pac: TTable;
+  b, c: Boolean;
+begin
+  if dbs.BaseClientServ = 'S' then SeleccionarLaboratorio(dbs.baseDat) else SeleccionarLaboratorio(dbs.dirSistema + '\archdat');
+  // Instanciamos las tablas a usar
+  pac := datosdb.openDB('paciente', 'Idprof;Codpac', '', xlaboratorio);
+  if dbs.BaseClientServ = 'S' then verificarEstructura(pac, dbs.baseDat) else verificarEstructura(pac, dbs.dirSistema + '\archdat');
+  // Copiamos los datos a exportar
+  pac.Open;
+  b := datosdb.verificarSiExisteCampo(pac, 'nrodoc');
+  c := datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc');
+  while not pac.EOF do Begin
+    if not Buscar(pac.FieldByName('idprof').AsString, pac.FieldByName('codpac').AsString) then Begin
+      tpaciente.Append;
+      tpaciente.FieldByName('idprof').AsString     := pac.FieldByName('idprof').AsString;
+      tpaciente.FieldByName('codpac').AsString     := pac.FieldByName('codpac').AsString;
+      tpaciente.FieldByName('nombre').AsString     := pac.FieldByName('nombre').AsString;
+      tpaciente.FieldByName('alta').AsString       := pac.FieldByName('alta').AsString;
+      if (b) and (c) then tpaciente.FieldByName('nrodoc').AsString := pac.FieldByName('nrodoc').AsString;
+      tpaciente.FieldByName('Gravadoiva').AsString := pac.FieldByName('Gravadova').AsString;
+      try
+        tpaciente.Post
+       except
+        tpaciente.Cancel
+      end;
+    end;
+    pac.Next;
+  end;
+  pac.Close; pac.Free;
+  desconectar;
+end;
+
+procedure TTPaciente.Importar(xidprof, xdirectorio: String; xlista: TStringList);
+// Objetivo...: Importar Pacientes
+var
+  t: TTable;
+  f, b, c, d: Boolean;
+Begin
+  f := tpaciente.Filtered;
+  tpaciente.Filtered := False;
+  t := datosdb.openDB('paciente', '', '', xdirectorio);
+  t.Open;
+  b := datosdb.verificarSiExisteCampo(t, 'gravadoiva');
+  c := datosdb.verificarSiExisteCampo(tpaciente, 'Nrodoc');
+  d := datosdb.verificarSiExisteCampo(t, 'Nrodoc');
+  while not t.Eof do Begin
+    if utiles.verificarItemsLista(xlista, xidprof + t.FieldByName('codpac').AsString) then Begin
+      if Buscar(xidprof, t.FieldByName('codpac').AsString) then tpaciente.Edit else tpaciente.Append;
+      tpaciente.FieldByName('idprof').AsString     := xidprof;
+      tpaciente.FieldByName('codpac').AsString     := t.FieldByName('codpac').AsString;
+      tpaciente.FieldByName('nombre').AsString     := t.FieldByName('nombre').AsString;
+      tpaciente.FieldByName('alta').AsString       := t.FieldByName('alta').AsString;
+      if (c) and (d) then tpaciente.FieldByName('nrodoc').AsString := t.FieldByName('nrodoc').AsString;
+      if b then tpaciente.FieldByName('gravadoiva').AsString := t.FieldByName('gravadoiva').AsString;
+      try
+        tpaciente.Post
+       except
+        tpaciente.Cancel
+      end;
+    end;
+    t.Next;
+  end;
+  datosdb.closeDB(t);
+  datosdb.refrescar(tpaciente);
+  tpaciente.Filtered := f;
+end;
+
+procedure TTPaciente.List_Tit(salida: char);
+// Objetivo...: Listar una Línea
+begin
+  list.Setear(salida);
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado de Pacientes', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, '      Cód.      Apellido y Nombre', 1, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+end;
+
+procedure TTPaciente.List_linea(salida: char);
+// Objetivo...: Listar una Línea
+begin
+  if tpaciente.FieldByName('idprof').AsString <> idprofant then Begin
+    profesional.getDatos(tpaciente.FieldByName('idprof').AsString);
+    if Length(Trim(idprofant)) > 0 then List.Linea(0, 0, '  ', 1, 'Arial, normal, 6', salida, 'S');
+    List.Linea(0, 0, profesional.codigo + '  ' + profesional.nombre, 1, 'Arial, negrita, 9', salida, 'S');
+    List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+    idprofant := tpaciente.FieldByName('idprof').AsString;
+  end;
+  List.Linea(0, 0, '       ' + tpaciente.FieldByName('codpac').AsString + '  ' + tpaciente.FieldByName('nombre').AsString, 1, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTPaciente.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listado de la clase
+begin
+  espacios := 0;
+  if orden = 'A' then tpaciente.IndexName := tpaciente.IndexDefs.Items[1].Name;
+  list_Tit(salida);
+
+  tpaciente.First;
+  while not tpaciente.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tpaciente.FieldByName('codpac').AsString >= iniciar) and (tpaciente.FieldByName('codpac').AsString <= finalizar) then List_linea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tpaciente.FieldByName('codpac').AsString < iniciar) or (tpaciente.FieldByName('codpac').AsString > finalizar) then List_linea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tpaciente.FieldByName('nombre').AsString >= iniciar) and (tpaciente.FieldByName('nombre').AsString <= finalizar) then List_linea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tpaciente.FieldByName('nombre').AsString < iniciar) or (tpaciente.FieldByName('nombre').AsString > finalizar) then List_linea(salida);
+
+      tpaciente.Next;
+    end;
+    List.FinList;
+
+    tpaciente.IndexFieldNames := tpaciente.IndexFieldNames;
+    tpaciente.First;
+end;
+
+procedure TTPaciente.BuscarPorCodigo(xidprof, xexpr: string);
+// Objetivo...: buscar por código
+begin
+  tpaciente.IndexFieldNames := 'Idprof;Codpac';
+  datosdb.BuscarEnFormaContextual(tpaciente, 'idprof', 'codpac', xidprof, xexpr);
+end;
+
+procedure TTPaciente.BuscarPorNombre(xexpr: string);
+// Objetivo...: buscar por nombre
+begin
+  tpaciente.IndexFieldNames := 'Nombre';
+  tpaciente.FindNearest([xexpr]);
+end;
+
+procedure TTPaciente.BuscarPorNrodoc(xexpr: string);
+// Objetivo...: buscar por documento
+begin
+  tpaciente.IndexFieldNames := 'Nrodoc';
+  tpaciente.FindNearest([xexpr]);
+end;
+
+
+function TTPaciente.Nuevo(xidprof: string): string;
+// Objetivo...: Devolver un nuevo paciente
+var
+  rsql: TQuery;
+begin
+  {rsql := datosdb.tranSQL('select max(cast(codpac as float)) as id from paciente where idprof = ' + '''' + xidprof + '''');
+  rsql.Open;
+  if (rsql.RecordCount = 0) then result := '1' else result := floattostr(rsql.FieldByName('id').AsFloat + 1);
+  rsql.Close; rsql.Free;}
+
+  if tpaciente.IndexFieldNames <> 'Idprof;Codpac' then tpaciente.IndexFieldNames := 'Idprof;Codpac';
+  if tpaciente.RecordCount = 0 then Result := '1' else Begin
+    tpaciente.Last;
+    Result := IntToStr(StrToInt(trim(tpaciente.FieldByName('codpac').AsString)) + 1);
+  end;
+end;
+
+function  TTPaciente.BuscarPorNroDocumento(xnrodoc: String): Boolean;
+// Objetivo...: Buscar Paciente por Nro de documento
+Begin
+  if not tpaciente.Active then tpaciente.Open;
+  if tpaciente.Filtered then Begin
+    tpaciente.Filtered := False;
+    verificarEstructura(tpaciente, tpaciente.DatabaseName);
+  end;
+  if tpaciente.IndexFieldNames <> 'Nrodoc' then tpaciente.IndexFieldNames := 'Nrodoc';
+  if tpaciente.FindKey([xnrodoc]) then Begin
+    idprof     := tpaciente.FieldByName('idprof').AsString;
+    codpac     := tpaciente.FieldByName('codpac').AsString;
+    nombre     := tpaciente.FieldByName('nombre').AsString;
+    gravadoiva := tpaciente.FieldByName('gravadoiva').AsString;
+    Result := True;
+  end else Begin
+    idprof := ''; codpac := ''; nombre := ''; gravadoiva := 'N';
+    Result := False;
+  end;
+end;
+
+function  TTPaciente.BuscarPorNroDocumento(xidprof, xnrodoc: String): Boolean;
+// Objetivo...: Buscar Paciente por Nro de documento
+Begin
+  if not tpaciente.Active then tpaciente.Open;
+  //if xidprof <> idprofant then Filtrar(xidprof);
+  //if tpaciente.IndexFieldNames <> 'Nrodoc' then tpaciente.IndexFieldNames := 'Nrodoc';
+  if tpaciente.IndexFieldNames <> 'Idprof;Nrodoc' then tpaciente.IndexFieldNames := 'Idprof;Nrodoc';
+  //if tpaciente.FindKey([xnrodoc]) then Begin
+  if (datosdb.Buscar(tpaciente, 'idprof', 'nrodoc', xidprof, xnrodoc)) then Begin
+    //utiles.msgError(nombre + '   ' + xnrodoc);
+    idprof     := tpaciente.FieldByName('idprof').AsString;
+    codpac     := tpaciente.FieldByName('codpac').AsString;
+    nombre     := tpaciente.FieldByName('nombre').AsString;
+    gravadoiva := tpaciente.FieldByName('gravadoiva').AsString;
+    Result := True;
+  end else Begin
+    idprof := ''; codpac := ''; nombre := ''; gravadoiva := 'N';
+    Result := False;
+  end;
+  idprofant := xidprof;
+end;
+
+procedure TTPaciente.Filtrar(xidprof: string);
+// Objetivo...: Filtrar los pacientes para un determinado profesional
+begin
+  if Length(Trim(xidprof)) > 0 then Begin
+    datosdb.Filtrar(tpaciente, 'Idprof = ' + xidprof);
+    tpaciente.FieldByName('idprof').DisplayLabel := 'Cód.Prof.'; tpaciente.FieldByName('codpac').DisplayLabel := 'Cód.'; tpaciente.FieldByName('nombre').DisplayLabel := 'Nombre del Paciente'; tpaciente.FieldByName('alta').DisplayLabel := 'F. Alta';
+    tpaciente.FieldByName('alta').Visible := False;
+    if datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc') then tpaciente.FieldByName('nrodoc').DisplayLabel := 'Nº Documento';
+    setNombresCols;
+  end;
+end;
+
+procedure TTPaciente.DesactivarFiltro;
+// Objetivo...: Quitar Filtro
+begin
+  datosdb.QuitarFiltro(tpaciente);
+end;
+
+procedure TTPaciente.setNombresCols;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  tpaciente.FieldByName('idprof').DisplayLabel := 'Cód.Prof.'; tpaciente.FieldByName('codpac').DisplayLabel := 'Cód.'; tpaciente.FieldByName('nombre').DisplayLabel := 'Nombre del Paciente'; tpaciente.FieldByName('alta').Visible := False;
+  if datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc') then tpaciente.FieldByName('nrodoc').DisplayLabel := 'Nº Documento';
+  if datosdb.verificarSiExisteCampo(tpaciente, 'Gravadoiva') then tpaciente.FieldByName('Gravadoiva').DisplayLabel := 'Gravado en I.V.A.';
+  if datosdb.verificarSiExisteCampo(tpaciente, 'Exportar') then tpaciente.FieldByName('Exportar').Visible := False;
+end;
+
+procedure TTPaciente.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tpaciente.Active then tpaciente.Open;
+    //verificarEstructura(tpaciente, dbconexion);
+    setNombresCols;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTPaciente.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tpaciente);
+end;
+
+procedure TTPaciente.SeleccionarLaboratorio(xdirectorio: string);
+// Objetivo...: Cambiar directorio de trabajo
+begin
+  if conexiones > 0 then desconectar;
+  tpaciente := nil;
+  tpaciente := datosdb.openDB('paciente', '', '', xdirectorio);
+  if conexiones <= 0 then conectar;
+  tpaciente.FieldByName('idprof').DisplayLabel := 'Cód.Prof.';
+  tpaciente.FieldByName('codpac').DisplayLabel := 'Cód.'; tpaciente.FieldByName('nombre').DisplayLabel := 'Nombre del Paciente';
+  tpaciente.FieldByName('alta').Visible := False;
+  if datosdb.verificarSiExisteCampo(tpaciente, 'nrodoc') then tpaciente.FieldByName('nrodoc').DisplayLabel := 'Nº Documento';
+  directorio := xdirectorio;
+  verificarEstructura(tpaciente, directorio);
+  if datosdb.verificarSiExisteCampo(tpaciente, 'Gravadoiva') then tpaciente.FieldByName('Gravadoiva').DisplayLabel := 'Gravado en I.V.A.';
+  if datosdb.verificarSiExisteCampo(tpaciente, 'Exportar') then tpaciente.FieldByName('Exportar').Visible := False;
+end;
+
+procedure TTPaciente.verificarEstructura(xtabla: TTable; xdirectorio: String);
+// Objetivo...: Verificar estructura de datos
+Begin
+  if (xdirectorio <> diranter) then Begin
+    xtabla.Close;
+    if not datosdb.verificarSiExisteCampo(xtabla.TableName, 'Gravadoiva', xdirectorio) then Begin
+      datosdb.tranSQL(xdirectorio, 'alter table paciente add Gravadoiva char(1)');
+    end;
+    if not datosdb.verificarSiExisteCampo(xtabla.TableName, 'Exportar', xdirectorio) then Begin
+      datosdb.tranSQL(xdirectorio, 'alter table paciente add Exportar char(1)');
+    end;
+    xtabla.Open;
+    if datosdb.verificarSiExisteCampo(xtabla, 'exportar') then xtabla.FieldByName('Exportar').Visible := False;
+    diranter := xdirectorio;
+  end;
+end;
+
+{===============================================================================}
+
+function paciente: TTPaciente;
+begin
+  if xpaciente = nil then
+    xpaciente := TTPaciente.Create;
+  Result := xpaciente;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xpaciente.Free;
+
+end.

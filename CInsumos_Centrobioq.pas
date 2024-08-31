@@ -1,0 +1,289 @@
+unit CInsumos_Centrobioq;
+
+interface
+
+uses CBDT, SysUtils, DBTables, CUtiles, CListar, CIDBFM, Classes;
+
+type
+
+TTInsumos = class
+  Id, Descrip: String; Precio_Vta, Precio_Com, Stock, StockMin: Real;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xid: String): Boolean;
+  procedure   Registrar(xid, xdescrip: String; xprecio_vta, xprecio_com, xstockmin, xstock: Real);
+  procedure   Borrar(xid: String);
+  procedure   getDatos(xid: String);
+  function    Nuevo: String;
+
+  procedure   AgregarStock(xid: String; xcantidad: Real);
+  procedure   QuitarStock(xid: String; xcantidad: Real);
+
+  procedure   BuscarPorId(xexpr: String);
+  procedure   BuscarPorDescrip(xexpr: String);
+
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   ListarStockBajoMinimo(orden, iniciar, finalizar, ent_excl: string; salida: char);
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  directorio: String;
+  conexiones: shortint;
+  procedure ListLinea(salida: char);
+  procedure ListLineaSM(salida: char);
+  procedure AjustarStock(xid: String; xcantidad: Real; xtipoper: String);
+end;
+
+function insumo: TTInsumos;
+
+implementation
+
+var
+  xinsumo: TTInsumos = nil;
+
+constructor TTInsumos.Create;
+begin
+  {dbs.getParametrosDB2;     // Base de datos adicional 2
+  if Length(Trim(dbs.db2)) > 0 then Begin
+    if dbs.baseDat_N <> dbs.db2 then dbs.NuevaBaseDeDatos2(dbs.db2, dbs.us2, dbs.pa2);
+    directorio := dbs.db2;
+  end else
+    directorio := dbs.DirSistema + '\distribucion\arch';}
+
+  tabla := datosdb.openDB('precios', '', '', dbs.baseDat);
+end;
+
+destructor TTInsumos.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTInsumos.Buscar(xid: String): Boolean;
+Begin
+  if tabla.IndexFieldNames <> 'Id' then tabla.IndexFieldNames := 'Id';
+  Result := tabla.FindKey([xid]);
+end;
+
+procedure TTInsumos.Registrar(xid, xdescrip: String; xprecio_vta, xprecio_com, xstockmin, xstock: Real);
+Begin
+  if Buscar(xid) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('id').AsString        := xid;
+  tabla.FieldByName('descrip').AsString   := xdescrip;
+  tabla.FieldByName('precio_vta').AsFloat := xprecio_vta;
+  tabla.FieldByName('precio_com').AsFloat := xprecio_com;
+  tabla.FieldByName('stockmin').AsFloat   := xstockmin;
+  tabla.FieldByName('stock').AsFloat      := xstock;
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTInsumos.Borrar(xid: String);
+Begin
+  if Buscar(xid) then tabla.Delete;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTInsumos.getDatos(xid: String);
+Begin
+  if Buscar(xid) then Begin
+    id         := tabla.FieldByName('id').AsString;
+    descrip    := tabla.FieldByName('descrip').AsString;
+    precio_vta := tabla.FieldByName('precio_vta').AsFloat;
+    precio_com := tabla.FieldByName('precio_com').AsFloat;
+    stock      := tabla.FieldByName('stock').AsFloat;
+    stockmin   := tabla.FieldByName('stockmin').AsFloat;
+  end else Begin
+    descrip    := ''; precio_vta := 0; precio_com := 0; stock := 0; stockmin := 0;
+  end;
+end;
+
+function  TTInsumos.Nuevo: String;
+Begin
+  if tabla.IndexFieldNames <> 'Id' then tabla.IndexFieldNames := 'Id';
+  if tabla.RecordCount = 0 then Result := '1' else Begin
+    tabla.Last;
+    Result := IntToStr(tabla.FieldByName('id').AsInteger + 1);
+  end;
+end;
+
+procedure TTInsumos.AgregarStock(xid: String; xcantidad: Real);
+Begin
+  AjustarStock(xid, xcantidad, 'C');
+end;
+
+procedure TTInsumos.QuitarStock(xid: String; xcantidad: Real);
+Begin
+  AjustarStock(xid, xcantidad, 'V');
+end;
+
+procedure TTInsumos.AjustarStock(xid: String; xcantidad: Real; xtipoper: String);
+var
+  cantidad: Real;
+Begin
+  if Buscar(xid) then Begin
+    if xtipoper = 'C' then cantidad := tabla.FieldByName('stock').AsFloat + xcantidad;
+    if xtipoper = 'V' then cantidad := tabla.FieldByName('stock').AsFloat - xcantidad;
+    tabla.Edit;
+    tabla.FieldByName('stock').AsFloat := cantidad;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.refrescar(tabla);
+  end;
+end;
+
+procedure TTInsumos.BuscarPorId(xexpr: String);
+Begin
+  if tabla.IndexFieldNames <> 'Id' then tabla.IndexFieldNames := 'Id';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTInsumos.BuscarPorDescrip(xexpr: String);
+Begin
+  if tabla.IndexFieldNames <> 'Descrip' then tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTInsumos.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar colección de objetos
+begin
+  if orden = 'A' then tabla.IndexName := tabla.IndexDefs.Items[1].Name;
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Lista de Precios', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.        Descripción del Insumo', 1, 'Arial, cursiva, 8');
+  List.Titulo(55, list.Lineactual, 'Stock', 2, 'Arial, cursiva, 8');
+  List.Titulo(65, list.Lineactual, 'P. Venta', 3, 'Arial, cursiva, 8');
+  List.Titulo(75, list.Lineactual, 'P. Costo', 4, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString >= iniciar) and (tabla.FieldByName('id').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString < iniciar) or (tabla.FieldByName('id').AsString > finalizar) then ListLinea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then ListLinea(salida);
+
+      tabla.Next;
+    end;
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTInsumos.ListLinea(salida: char);
+begin
+  List.Linea(0, 0, tabla.FieldByName('id').AsString + '   ' + tabla.FieldByName('descrip').AsString, 1, 'Arial, normal, 8', salida, 'N');
+  List.importe(60, List.lineactual, '', tabla.FieldByName('stock').AsFloat, 2, 'Arial, normal, 8');
+  List.importe(71, List.lineactual, '', tabla.FieldByName('precio_vta').AsFloat, 3, 'Arial, normal, 8');
+  List.importe(81, List.lineactual, '', tabla.FieldByName('precio_com').AsFloat, 4, 'Arial, normal, 8');
+  List.Linea(85, list.lineactual, ' ', 5, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTInsumos.ListarStockBajoMinimo(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar colección de objetos
+begin
+  if orden = 'A' then tabla.IndexName := tabla.IndexDefs.Items[1].Name;
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado de Stock Bajo Mínimo', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.        Descripción del Insumo', 1, 'Arial, cursiva, 8');
+  List.Titulo(65, list.Lineactual, 'Stock', 2, 'Arial, cursiva, 8');
+  List.Titulo(75, list.Lineactual, 'Stock Mín.', 3, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString >= iniciar) and (tabla.FieldByName('id').AsString <= finalizar) then ListLineaSM(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString < iniciar) or (tabla.FieldByName('id').AsString > finalizar) then ListLineaSM(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then ListLineaSM(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then ListLineaSM(salida);
+
+      tabla.Next;
+    end;
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTInsumos.ListLineaSM(salida: char);
+begin
+  if tabla.FieldByName('stock').AsFloat <= tabla.FieldByName('stockmin').AsFloat then Begin
+    List.Linea(0, 0, tabla.FieldByName('id').AsString + '   ' + tabla.FieldByName('descrip').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    List.importe(71, List.lineactual, '', tabla.FieldByName('stock').AsFloat, 2, 'Arial, normal, 8');
+    List.importe(84, List.lineactual, '', tabla.FieldByName('stockmin').AsFloat, 3, 'Arial, normal, 8');
+    List.Linea(85, list.lineactual, ' ', 4, 'Arial, normal, 8', salida, 'S');
+  end;
+end;
+
+procedure TTInsumos.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+  end;
+  Inc(conexiones);
+  tabla.FieldByName('id').DisplayLabel := 'Id.'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('stockmin').DisplayLabel := 'Stock Mínimo';
+  tabla.FieldByName('precio_vta').DisplayLabel := 'Precio Venta'; tabla.FieldByName('precio_com').DisplayLabel := 'Costo'; tabla.FieldByName('stock').DisplayLabel := 'Stock';
+end;
+
+procedure TTInsumos.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    if Length(Trim(dbs.db2)) > 0 then
+      if dbs.TDB2.Connected then dbs.TDB2.Close;
+  end;
+end;
+
+{===============================================================================}
+
+function insumo: TTInsumos;
+begin
+  if xinsumo = nil then
+    xinsumo := TTInsumos.Create;
+  Result := xinsumo;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xinsumo.Free;
+
+end.

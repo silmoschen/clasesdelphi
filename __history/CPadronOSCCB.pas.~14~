@@ -1,0 +1,481 @@
+unit CPadronOSCCB;
+
+interface
+
+uses CObrasSocialesCCB, CBDT, SysUtils, DBTables, CUtiles, CListar, CIDBFM, CUtilidadesArchivos,
+     CFirebird, IBTable, WinProcs;
+
+type
+
+TTPadronOS = class
+  Nrodoc, Codos, Nombre, Observacion, Fechanac, Interbase: String;
+  tabla: TTable; tablaIB: TIBTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xcodos, xnrodoc: String): Boolean;
+  procedure   Guardar(xcodos, xnrodoc, xnombre: String); overload;
+  procedure   Guardar(xcodos, xnrodoc, xnombre, xobservacion, xfechanac: String); overload;
+  procedure   Guardar(xcodos, xnrodoc, xnombre, xobservacion, xfechanac: String; altas: boolean); overload;
+  procedure   getDatos(xcodos, xnrodoc: String);
+  procedure   getDatosExistentes(xcodos, xnrodoc: String);
+  procedure   Borrar(xcodos, xnrodoc: String); overload;
+  function    getNrodoc: String;
+
+  procedure   BuscarPorNrodoc(xcodos, xexpr: String);
+  procedure   BuscarPorNombre(xexpr: String);
+
+  procedure   Listar(xcodos, xobrasocial, orden, iniciar, finalizar, ent_excl: string; salida: char);
+
+  function    verificarPadron(xcodos: String): Boolean;
+  procedure   BorrarAfiliados(xcodos: String);
+
+  function    setCantidad: Integer;
+
+  procedure   Filtrar(xcodos: string);
+  procedure   QuitarFiltro;
+
+  function    conectar(xcodos: String): Boolean;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  idanter, host, usuario, password: String;
+  nocrearpadron, actualiza: Boolean;
+  ffirebird: TTFirebird;
+  procedure   ListLinea(salida: char);
+  procedure   ListCol;
+end;
+
+function padron: TTPadronOS;
+
+implementation
+
+var
+  xpadron: TTPadronOS = nil;
+
+constructor TTPadronOS.Create;
+begin
+  nocrearpadron := False;
+end;
+
+destructor TTPadronOS.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTPadronOS.Buscar(xcodos, xnrodoc: String): Boolean;
+// Objetivo...: Buscar una instancia
+Begin
+  if xcodos <> idanter then Begin
+    desconectar;
+    conexiones := 0;
+    conectar(xcodos);
+  end;
+  if conexiones > 0 then Begin
+    if interbase <> 'S' then Begin
+      if tabla.IndexFieldNames <> 'Codos;Nrodoc' then tabla.IndexFieldNames :=  'Codos;Nrodoc';
+      Result := datosdb.Buscar(tabla, 'Codos', 'Nrodoc', xcodos, xnrodoc);
+    end;
+    if interbase = 'S' then Begin
+       if tablaIB.IndexFieldNames <> 'codos;nrodoc' then tablaIB.IndexFieldNames :=  'CODOS;NRODOC';
+      Result := ffirebird.Buscar(tablaIB, 'codos;nrodoc', xcodos, xnrodoc);
+    end;
+  end else Result := False;
+end;
+
+procedure TTPadronOS.Guardar(xcodos, xnrodoc, xnombre: String);
+// Objetivo...: Guardar en Parón datos personales
+var
+  id: String;
+Begin
+  if Length(Trim(xnrodoc)) = 0 then id := '*' + utiles.sExprFecha2000(utiles.setFechaActual) + Copy(utiles.setHoraActual24, 1, 2) + Copy(utiles.setHoraActual24, 4, 2) + Copy(utiles.setHoraActual24, 7, 2) else id := xnrodoc;
+  if interbase <> 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then tabla.Edit else tabla.Append;
+    tabla.FieldByName('codos').AsString       := xcodos;
+    tabla.FieldByName('nrodoc').AsString      := id;
+    tabla.FieldByName('nombre').AsString      := xnombre;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+  if interbase = 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then tablaIB.Edit else tablaIB.Append;
+    tablaIB.FieldByName('CODOS').AsString       := xcodos;
+    tablaIB.FieldByName('NRODOC').AsString      := id;
+    tablaIB.FieldByName('NOMBRE').AsString      := xnombre;
+    try
+      tablaIB.Post
+     except
+      tablaIB.Cancel
+    end;
+    ffirebird.RegistrarTransaccion(tablaIB);
+  end;
+  if not actualiza then ListCol;
+end;
+
+procedure TTPadronOS.Guardar(xcodos, xnrodoc, xnombre, xobservacion, xfechanac: String);
+// Objetivo...: Guardar en Parón datos personales
+var
+  id: String;
+Begin
+  if Length(Trim(xnrodoc)) = 0 then id := '*' + utiles.sExprFecha2000(utiles.setFechaActual) + Copy(utiles.setHoraActual24, 1, 2) + Copy(utiles.setHoraActual24, 4, 2) + Copy(utiles.setHoraActual24, 7, 2) else id := xnrodoc;
+  if interbase <> 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then tabla.Edit else tabla.Append;
+    tabla.FieldByName('codos').AsString       := xcodos;
+    tabla.FieldByName('nrodoc').AsString      := id;
+    tabla.FieldByName('nombre').AsString      := xnombre;
+    tabla.FieldByName('observacion').AsString := xobservacion;
+    tabla.FieldByName('fechanac').AsString    := xfechanac;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+  if interbase = 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then tablaIB.Edit else tablaIB.Append;
+    tablaIB.FieldByName('CODOS').AsString       := xcodos;
+    tablaIB.FieldByName('NRODOC').AsString      := id;
+    tablaIB.FieldByName('NOMBRE').AsString      := xnombre;
+    tablaIB.FieldByName('OBSERVACION').AsString := xobservacion;
+    tablaIB.FieldByName('FECHANAC').AsString    := xfechanac;
+    try
+      tablaIB.Post
+     except
+      tablaIB.Cancel
+    end;
+    ffirebird.RegistrarTransaccion(tablaIB);
+  end;
+  if not actualiza then ListCol;
+end;
+
+procedure TTPadronOS.Guardar(xcodos, xnrodoc, xnombre, xobservacion, xfechanac: String; altas: boolean);
+// Objetivo...: Guardar en Parón datos personales
+Begin
+  actualiza := true;
+  if not Buscar(xcodos, xnrodoc) then Guardar(xcodos, xnrodoc, xnombre, xobservacion, xfechanac);
+  actualiza := false;
+end;
+
+procedure TTPadronOS.getDatos(xcodos, xnrodoc: String);
+// Objetivo...: Buscar una instancia
+Begin
+  if interbase <> 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then Begin
+      codos       := tabla.FieldByName('codos').AsString;
+      nrodoc      := TrimRight(tabla.FieldByName('nrodoc').AsString);
+      nombre      := tabla.FieldByName('nombre').AsString;
+      observacion := tabla.FieldByName('observacion').AsString;
+      fechanac    := tabla.FieldByName('fechanac').AsString;
+    end else Begin
+      Codos := ''; Nrodoc := ''; Nombre := '*** INEXISTENTE ***'; observacion := ''; fechanac := '';
+    end;
+  end;
+  if interbase = 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then Begin
+      codos       := tablaIB.FieldByName('CODOS').AsString;
+      nrodoc      := TrimRight(tablaIB.FieldByName('NRODOC').AsString);
+      nombre      := tablaIB.FieldByName('NOMBRE').AsString;
+      observacion := tablaIB.FieldByName('OBSERVACION').AsString;
+      fechanac    := tablaIB.FieldByName('FECHANAC').AsString;
+    end else Begin
+      Codos := ''; Nrodoc := ''; Nombre := '*** INEXISTENTE ***'; observacion := ''; fechanac := '';
+    end;
+  end;
+end;
+
+procedure TTPadronOS.getDatosExistentes(xcodos, xnrodoc: String);
+// Objetivo...: Buscar una instancia
+Begin
+  nocrearpadron := True;
+  getDatos(xcodos, xnrodoc);
+  idanter := '';
+  nocrearpadron := False;
+end;
+
+procedure TTPadronOS.Borrar(xcodos, xnrodoc: String);
+// Objetivo...: Borrar una instancia
+Begin
+  if interbase <> 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then tabla.Delete;
+    datosdb.closedb(tabla); tabla.Open;
+  end;
+  if interbase = 'S' then Begin
+    if Buscar(xcodos, xnrodoc) then Begin
+      tablaIB.Delete;
+      ffirebird.RegistrarTransaccion(tablaIB);
+    end;
+  end;
+  ListCol;
+end;
+
+function TTPadronOS.getNrodoc: String;
+// Objetivo...: Recuperar Nro. de Afiliado
+Begin
+  if interbase <> 'S' then Result := TrimRight(tabla.FieldByName('nrodoc').AsString);
+  if interbase = 'S' then Result := TrimRight(tablaIB.FieldByName('NRODOC').AsString);
+end;
+
+
+procedure TTPadronOS.BuscarPorNrodoc(xcodos, xexpr: String);
+Begin
+  if interbase <> 'S' then Begin
+    if tabla.IndexFieldNames <> 'Codos;Nrodoc' then tabla.IndexFieldNames := 'Codos;Nrodoc';
+    datosdb.BuscarEnFormaContextual(tabla, 'codos', 'nrodoc', xcodos, xexpr);
+  end;
+  if interbase = 'S' then Begin
+    if tablaIB.IndexFieldNames <> 'CODOS;NRODOC' then tablaIB.IndexFieldNames := 'CODOS;NRODOC';
+    ffirebird.BuscarContextualmente(tablaIB, 'CODOS;NRODOC', xcodos, xexpr);
+  end;
+  ListCol;
+end;
+
+procedure TTPadronOS.BuscarPorNombre(xexpr: String);
+Begin
+  if interbase <> 'S' then Begin
+    if tabla.IndexFieldNames <> 'Nombre' then tabla.IndexFieldNames := 'Nombre';
+    tabla.FindNearest([xexpr]);
+  end;
+  if interbase = 'S' then Begin
+    if tablaIB.IndexFieldNames <> 'NOMBRE' then tablaIB.IndexFieldNames := 'NOMBRE';
+    ffirebird.BuscarContextualmente(tablaIB, 'NOMBRE', xexpr);
+  end;
+end;
+
+procedure TTPadronOS.Listar(xcodos, xobrasocial, orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar colección de objetos
+begin
+  if orden = 'A' then tabla.IndexFieldNames := 'Nombre';
+
+  list.Setear(salida);
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Padrón Afiliados - ' + xcodos + '  ' + xobrasocial, 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Nro. Documento', 1, 'Arial, cursiva, 8');
+  List.Titulo(20, list.Lineactual, 'Nombre', 2, 'Arial, cursiva, 8');
+  List.Titulo(60, list.Lineactual, 'Observación', 3, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  if interbase <> 'S' then Begin
+    tabla.First;
+    while not tabla.EOF do Begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('nrodoc').AsString >= iniciar) and (tabla.FieldByName('nrodoc').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+      if (tabla.FieldByName('nrodoc').AsString < iniciar) or (tabla.FieldByName('nrodoc').AsString > finalizar) then ListLinea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('Nombre').AsString >= iniciar) and (tabla.FieldByName('Nombre').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('Nombre').AsString < iniciar) or (tabla.FieldByName('Nombre').AsString > finalizar) then ListLinea(salida);
+
+      tabla.Next;
+    end;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+  end;
+
+  if interbase = 'S' then Begin
+    tablaIB.First;
+    while not tablaIB.EOF do Begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tablaIB.FieldByName('NRODOC').AsString >= iniciar) and (tablaIB.FieldByName('NRODOC').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+      if (tablaIB.FieldByName('NRODOC').AsString < iniciar) or (tablaIB.FieldByName('NRODOC').AsString > finalizar) then ListLinea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tablaIB.FieldByName('NOMBRE').AsString >= iniciar) and (tablaIB.FieldByName('NOMBRE').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tablaIB.FieldByName('NOMBRE').AsString < iniciar) or (tablaIB.FieldByName('NOMBRE').AsString > finalizar) then ListLinea(salida);
+
+      tablaIB.Next;
+    end;
+
+    tablaIB.IndexFieldNames := tablaIB.IndexFieldNames;
+    tablaIB.First;
+  end;
+
+  List.FinList;
+end;
+
+procedure TTPadronOS.ListLinea(salida: char);
+// Objetivo...: Listar Linea
+begin
+  if interbase <> 'S' then Begin
+    List.Linea(0, 0, tabla.FieldByName('nrodoc').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    List.Linea(20, list.Lineactual, tabla.FieldByName('Nombre').AsString, 2, 'Arial, normal, 8', salida, 'N');
+    List.Linea(60, list.Lineactual, tabla.FieldByName('observacion').AsString, 3, 'Arial, normal, 8', salida, 'S');
+  end;
+  if interbase = 'S' then Begin
+    List.Linea(0, 0, tablaIB.FieldByName('NRODOC').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    List.Linea(20, list.Lineactual, tablaIB.FieldByName('NOMBRE').AsString, 2, 'Arial, normal, 8', salida, 'N');
+    List.Linea(60, list.Lineactual, tablaIB.FieldByName('OBSERVACION').AsString, 3, 'Arial, normal, 8', salida, 'S');
+  end;
+end;
+
+function TTPadronOS.verificarPadron(xcodos: String): Boolean;
+var
+  dir_remoto: String;
+Begin
+  //ffirebird.getModulo('auditoria');
+  //if ffirebird.Dir_Remoto = 'N' then dir_remoto := dbs.DirSistema + '\auditoria\obsoc_pad' else dir_remoto := ffirebird.Dir_Remoto;
+  //if (not (DirectoryExists(Dir_Remoto + '\' + xcodos))) then Result := False else Result := True;
+  result := true;
+end;
+
+procedure TTPadronOS.BorrarAfiliados(xcodos: String);
+// Objetivo...: Borrar Padron de Afiliados
+Begin
+  if interbase <> 'S' then Begin
+    datosdb.tranSQL(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos, 'delete from bioqafil');
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+end;
+
+procedure TTPadronOS.ListCol;
+// Objetivo...: Listar columna
+Begin
+  if (interbase <> 'S') and (tabla <> Nil) then Begin
+    tabla.FieldByName('NRODOC').DisplayLabel := 'Doc.Afiliado'; tabla.FieldByName('NOMBRE').DisplayLabel := 'Nombre del Afiliado'; tabla.FieldByName('CODOS').Visible := False;
+    tabla.FieldByName('OBSERVACION').DisplayLabel := 'Observaciones'; tabla.FieldByName('FECHANAC').DisplayLabel := 'F.Nacim.';
+  end;
+  if (interbase = 'S') and (tablaIB <> Nil) then Begin
+    tablaIB.FieldByName('NRODOC').DisplayLabel := 'Doc.Afiliado'; tablaIB.FieldByName('NOMBRE').DisplayLabel := 'Nombre del Afiliado'; tablaIB.FieldByName('CODOS').Visible := False;
+    tablaIB.FieldByName('OBSERVACION').DisplayLabel := 'Observaciones'; tablaIB.FieldByName('FECHANAC').DisplayLabel := 'F.Nacim.';
+  end;
+end;
+
+function TTPadronOS.setCantidad: Integer;
+// Objetivo...: Devolver la cantidad de afiliados
+Begin
+  if (interbase <> 'S') and (tabla <> Nil) then Result := tabla.RecordCount;
+  if (interbase = 'S') and (tablaIB <> Nil) then Result := tablaIB.RecordCount;
+end;
+
+function TTPadronOS.conectar(xcodos: String): Boolean;
+// Objetivo...: cerrar tablas de persistencia
+var
+  ok: Boolean;
+  db, comando_dos, dir_remoto: String;
+begin
+  desconectar;
+
+  dbs.getParametrosDB1;     // Base de datos adicional 1
+  if Length(Trim(dbs.db1)) > 0 then interbase := 'S';
+
+
+  {if interbase <> 'S' then Begin
+    ok := False;
+    if not (DirectoryExists(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos)) and not (nocrearpadron) then Begin
+      if utiles.msgSiNo('El Padrón de la Obra Social ' + xcodos + ' no Existe,' + chr(13) + 'Desea Crearlo ?') then Begin
+        utilesarchivos.CrearDirectorio(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos);
+        utilesarchivos.CopiarArchivos(dbs.DirSistema + '\auditoria\obsoc_pad\estructu', '*.*', dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos);
+        ok := True;
+      end;
+    end else
+      ok := True;
+
+    if (ok) and (DirectoryExists(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos)) and (FileExists(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos + '\bioqafil.db')) then Begin
+      tabla  := datosdb.openDB('bioqafil', '', '', dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos);
+      if not tabla.Active then tabla.Open;
+      if not datosdb.verificarSiExisteCampo(tabla, 'observacion') then Begin
+        tabla.Close;
+        datosdb.tranSQL(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos, 'alter table bioqafil add observacion char(50)');
+        tabla.Open;
+      end;
+      if not datosdb.verificarSiExisteCampo(tabla, 'fechanac') then Begin
+        tabla.Close;
+        datosdb.tranSQL(dbs.DirSistema + '\auditoria\obsoc_pad\' + xcodos, 'alter table bioqafil add fechanac char(10)');
+        tabla.Open;
+      end;
+      conexiones := 1;
+      ListCol;
+    end;
+
+  end;}
+
+  if interbase = 'S' then Begin
+    ffirebird := TTFirebird.Create;
+    ffirebird.getModulo('auditoria');
+    ok := False;
+    {if ffirebird.Dir_Remoto = 'N' then dir_remoto := dbs.DirSistema + '\auditoria\obsoc_pad' else dir_remoto := ffirebird.Dir_Remoto;
+    if (not (DirectoryExists(Dir_Remoto + '\' + xcodos)) or not (FileExists(Dir_Remoto + '\' + '\' + xcodos + '\bioqafil.gdb'))) and not (nocrearpadron) then Begin
+      if utiles.msgSiNo('El Padrón de la Obra Social ' + xcodos + ' no Existe,' + chr(13) + 'Desea Crearlo ?') then Begin
+        utilesarchivos.CrearDirectorio(Dir_Remoto + '\' + xcodos);
+        utilesarchivos.CopiarArchivos(Dir_Remoto + '\estructuibase', '*.*', Dir_Remoto + '\' + xcodos);
+        comando_dos := 'copy ' + Dir_Remoto + '\' + xcodos + '\estructuibase\bioqafil.gdb ' + Dir_Remoto + '\' + xcodos;
+        ok := True;
+      end;
+    end else}
+      ok := True;
+
+    if (ok) then Begin // and (DirectoryExists(firebird.Dir_Remoto + '\' + xcodos) and (FileExists(firebird.Dir_Remoto + '\' + xcodos + '\bioqafil.gdb')) then Begin
+      host     := ffirebird.Host;
+      usuario  := ffirebird.Usuario;
+      password := ffirebird.Password;
+      //db := host + '\' + xcodos + '\bioqafil.gdb';
+      db := host + '\auditoria.gdb';
+      ffirebird.Conectar(db, usuario, password);
+      tablaIB := ffirebird.InstanciarTabla('bioqafil');
+      if not tablaIB.Active then tablaIB.Open;
+      conexiones := 1;
+      ListCol;
+    end;
+
+  end;
+  idanter := xcodos;
+  Result  := ok;
+end;
+
+procedure TTPadronOS.Filtrar(xcodos: string);
+begin
+  ffirebird.Filtrar(tablaIB, 'codos = ' + '''' + xcodos + '''');
+end;
+
+procedure TTPadronOS.QuitarFiltro;
+begin
+  ffirebird.QuitarFiltro(tablaIB);
+end;
+
+procedure TTPadronOS.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if interbase <> 'S' then
+    if tabla <> nil then datosdb.closeDB(tabla);
+  if interbase = 'S' then begin
+    if tablaIB <> nil then Begin
+      ffirebird.closeDB(tablaIB);
+      ffirebird.Desconectar;
+    end;
+  end;
+  idanter := ''; conexiones := 0; nocrearpadron := False;
+end;
+
+{===============================================================================}
+
+function padron: TTPadronOS;
+begin
+  if xpadron = nil then
+    xpadron := TTPadronOS.Create;
+  Result := xpadron;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xpadron.Free;
+
+end.

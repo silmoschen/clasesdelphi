@@ -1,0 +1,207 @@
+unit CSolAnalisisTrotta;
+
+interface
+
+uses CSolAnalisis, CPaciente, CProfesional, CPlantanalisis, DBTables, CIDBFM, CBDT, CUtiles, SysUtils, CListar, CTitulos, CNomecla, CObrasSociales;
+
+type
+
+TTSolicitudAnalisisTrotta = class(TTSolicitudAnalisis)
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+
+  procedure   GuardarDatosComplementariosSolicitud(xprotocolo, xabona: string; xtotal, xentrega: real; xfechaent, xretirafecha, xretirahora: string);
+  procedure   getDatos(xnrosolicitud: string); overload;
+  procedure   ListHojaDeTrabajo(xnrosolicitud: string; salida: char);
+
+  function    getProtocolos(xdesde, xhasta: string): TQuery;
+  function    getProtocolosItems(xnrosolicitud: string): TQuery;
+  function    getProtocolosItemsResultado(xnrosolicitud, xitems: string): TQuery;
+  function    getProtocolosItemsResultadoObservaciones(xnrosolicitud, xcodanalisis, xitems: string): TQuery;
+
+  procedure   conectar;
+  procedure   desconectar;
+ protected
+  { Declaraciones Protegidas }
+  procedure   ListHDeTrabajo(xnrosolicitud: string; salida: char); override;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+end;
+
+function solanalisis: TTSolicitudAnalisisTrotta;
+
+implementation
+
+var
+  xsolanalisis: TTSolicitudAnalisisTrotta = nil;
+
+constructor TTSolicitudAnalisisTrotta.Create;
+begin
+  inherited Create;
+  solicitud      := datosdb.openDB('solicitud', 'nrosolicitud');
+  detsol         := datosdb.openDB('detsol', 'nrosolicitud;items');
+  resultado      := datosdb.openDB('resultado', 'nrosolicitud;codanalisis;items');
+  obsresul       := datosdb.openDB('refanalisis', 'nrosolicitud;codanalisis;items');
+  obsanalisis    := datosdb.openDB('obsanalisis', 'nrosolicitud;codanalisis');
+  movpagos       := datosdb.openDB('movpagos', '');
+  //plantillasIMP  := datosdb.openDB('plantillasimp', '');
+  fuenteObservac := 'Arial, cursiva, 9';
+end;
+
+procedure TTSolicitudAnalisisTrotta.GuardarDatosComplementariosSolicitud(xprotocolo, xabona: string; xtotal, xentrega: real; xfechaent, xretirafecha, xretirahora: string);
+// Objetivo...: Guardar datos complementarios de la solicitud
+begin
+  if inherited Buscar(xprotocolo) then Begin
+    solicitud.Edit;
+    solicitud.FieldByName('abona').AsString       := xabona;
+    solicitud.FieldByName('total').AsFloat        := xtotal;
+    solicitud.FieldByName('entrega').AsFloat      := xentrega;
+    solicitud.FieldByName('fechaent').AsString    := utiles.sExprFecha(xfechaent);
+    solicitud.FieldByName('retirafecha').AsString := utiles.sExprFecha(xretirafecha);
+    solicitud.FieldByName('retirahora').AsString  := xretirahora;
+    try
+      solicitud.Post
+    except
+      solicitud.Cancel
+    end;
+  end;
+end;
+
+procedure TTSolicitudAnalisisTrotta.getDatos(xnrosolicitud: string);
+// Objetivo...: Cargar los datos de la solicitud
+begin
+  inherited getDatos(xnrosolicitud);
+  if exisolicitud then Begin
+    abona        := solicitud.FieldByName('abona').AsString;
+    retiraFecha  := utiles.sFormatoFecha(solicitud.FieldByName('retirafecha').AsString);
+    retiraHora   := solicitud.FieldByName('retirahora').AsString;
+    total        := solicitud.FieldByName('total').AsFloat;
+    entrega      := solicitud.FieldByName('entrega').AsFloat;
+    if Length(Trim(solicitud.FieldByName('fechaent').AsString)) = 8 then fechaEntrega := utiles.sFormatoFecha(solicitud.FieldByName('fechaent').AsString) else fechaEntrega := utiles.sFormatoFecha(utiles.sExprFecha(DateToStr(Now())));
+  end else Begin
+    abona := ''; fechaEntrega := utiles.sFormatoFecha(utiles.sExprFecha(DateToStr(Now()))); retiraFecha := ''; retiraHora := ''; total := 0; entrega := 0;
+  end;
+end;
+
+procedure TTSolicitudAnalisisTrotta.ListHojaDeTrabajo(xnrosolicitud: string; salida: char);
+// Objetivo...: Listar hoja de trabajo
+begin
+  getDatos(xnrosolicitud);
+  ListHDeTrabajo(xnrosolicitud, salida);
+  list.CompletarPagina;
+  list.FinList;
+end;
+
+procedure TTSolicitudAnalisisTrotta.ListHDeTrabajo(xnrosolicitud: string; salida: char);
+// Objetivo...: Listar Observaciones de Solicitud
+const
+  c: string = ' ';
+var
+  r: TQuery; ls, x, s, edadpac: string; lineas, i, j: integer;
+begin
+  getDatos(xnrosolicitud);  // Cargamos la solicitud pedida
+
+  list.Setear(salida);
+  list.NoImprimirPieDePagina;
+
+  List.Linea(0, 0, 'Hoja de Trabajo ', 1, 'Arial, negrita, 14', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
+
+  // 1º Línea
+  List.Linea(0, 0, 'Nombre ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + paciente.nombre, 2, 'Arial, normal, 9', salida, 'S');
+  // 2º Línea
+  if Copy(paciente.fenac, 7, 2) > '05' then s := '19' else s := '20';
+  x := Copy(paciente.Fenac, 1, 6) + s + Copy(paciente.Fenac, 7, 2);
+  if Length(Trim(paciente.fenac)) > 0 then edadpac := IntToStr(utiles.Edad(x)) else edadpac := '';
+  List.Linea(0, 0, 'Edad ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + edadpac, 2, 'Arial, normal, 9', salida, 'S');
+  // 3º Línea
+  List.Linea(0, 0, 'Nº Solicitud', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + solicitud.FieldByName('nrosolicitud').AsString, 2, 'Arial, normal, 10', salida, 'S');
+  // 4º Línea
+  List.Linea(0, 0, 'Fecha ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + fecha, 2, 'Arial, normal, 9', salida, 'S');
+  // 5º Línea
+  List.Linea(0, 0, 'Profesional', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + profesional.nombres, 2, 'Arial, normal, 9', salida, 'S');
+  // 6º Línea
+  List.Linea(0, 0, ' ', 1, 'Arial, normal, 4', salida, 'S');
+  // 7º Línea
+  List.Linea(0, 0, 'Abona', 1, 'Arial, cursiva, 8', salida, 'N'); List.Linea(6, list.Lineactual, ':', 2, 'Arial, cursiva, 8', salida, 'N'); List.importe(15, list.Lineactual, '', total, 3, 'Arial, cursiva, 8');
+  List.Linea(16, list.Lineactual, 'Entrega', 4, 'Arial, normal, 8', salida, 'N'); List.Linea(22, list.Lineactual, ':', 5, 'Arial, normal, 8', salida, 'N'); List.importe(31, list.Lineactual, '', entrega, 6, 'Arial, normal, 8');
+  List.Linea(34, list.Lineactual, 'Saldo', 7, 'Arial, normal, 8', salida, 'N'); List.Linea(39, list.Lineactual, ':', 8, 'Arial, normal, 8', salida, 'N'); List.importe(49, list.Lineactual, '', total - entrega, 9, 'Arial, normal, 8');
+
+  List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
+  List.Linea(0, 0, 'Prometido para el:  ' + retiraFecha + '  -  ' + retiraHora + ' Hs.', 1, 'Arial, normal, 9', salida, 'S');
+  // 8º Línea
+  List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
+  List.Linea(0, 0, 'Solicitud:', 1, 'Arial, cursiva, 9', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Arial, negrita, 5', salida, 'S');
+
+  // Obtenemos la lista de análisis
+  r := setAnalisis(xnrosolicitud);
+  r.Open; r.First;
+  while not r.EOF do Begin
+    nomeclatura.getDatos(r.FieldByName('codanalisis').AsString);
+    obsocial.getDatos(r.FieldByName('codos').AsString);
+    List.Linea(0, 0, '   ' + r.FieldByName('codanalisis').AsString + ' ' + Copy(nomeclatura.descrip, 1, 36), 1, 'Arial, normal, 9', salida, 'S');
+    List.Linea(0, 0, '  ', 1, 'Arial, normal, 5', salida, 'S');
+    r.Next;
+  end;
+  r.Close; r.Free;
+
+  list.ListMemo('observaciones', 'Arial, cursiva, 8', 0, salida, solicitud, 0);
+end;
+
+function  TTSolicitudAnalisisTrotta.getProtocolos(xdesde, xhasta: string): TQuery;
+begin
+  result := datosdb.tranSQL('select nrosolicitud, protocolo, fecha, codpac, codprof, codos from solicitud where fecha between ' +
+              '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and ' + '''' + utiles.sExprFecha2000(xhasta) + '''' + ' order by nrosolicitud desc');
+end;
+
+function  TTSolicitudAnalisisTrotta.getProtocolosItems(xnrosolicitud: string): TQuery;
+begin
+  result := datosdb.tranSQL('select nrosolicitud, items, codanalisis from detsol where nrosolicitud = ' + '''' + xnrosolicitud + '''' + ' order by items');
+end;
+
+function TTSolicitudAnalisisTrotta.getProtocolosItemsResultado(xnrosolicitud, xitems: string): TQuery;
+begin
+  result := datosdb.tranSQL('select nrosolicitud, items, codanalisis, resultado, valoresn, nroanalisis from resultado where nrosolicitud = ' + ''''
+         + xnrosolicitud + '''' + ' and codanalisis =  ' + '''' + xitems + '''' + ' order by items');
+end;
+
+function TTSolicitudAnalisisTrotta.getProtocolosItemsResultadoObservaciones(xnrosolicitud, xcodanalisis, xitems: string): TQuery;
+begin
+  result := datosdb.tranSQL('select observaciones from refanalisis where nrosolicitud = ' + ''''
+         + xnrosolicitud + '''' + ' and codanalisis =  ' + '''' + xcodanalisis + '''' + ' and items = ' + '''' + xitems + '''');
+end;
+
+procedure TTSolicitudAnalisisTrotta.conectar;
+// Objetivo...: conectar tablas de persistencia
+begin
+  inherited conectar;
+  Inc(conexiones);
+end;
+
+procedure TTSolicitudAnalisisTrotta.desconectar;
+// Objetivo...: desconectar tablas de persistencia
+begin
+  inherited desconectar;
+  if conexiones > 0 then Dec(conexiones);
+end;
+
+{===============================================================================}
+
+function solanalisis: TTSolicitudAnalisisTrotta;
+begin
+  if xsolanalisis = nil then
+    xsolanalisis := TTSolicitudAnalisisTrotta.Create;
+  Result := xsolanalisis;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xsolanalisis.Free;
+
+end.

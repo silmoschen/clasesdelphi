@@ -1,0 +1,181 @@
+unit CAgrupacionOSFact;
+
+interface
+
+uses CBDT, SysUtils, DBTables, CUtiles, CListar, CIDBFM;
+
+type
+
+TTAgrupaOSFacturar = class
+  ID, Nombre, Cuit, Direccion, Localidad, Codpfis: String;
+  Tope: integer;
+  tabla, detos: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    buscar(xid: string): boolean;
+  procedure   guardar(xid, xnombre, xcuit, xdireccion, xlocalidad, xcodpfis: string; xtope: integer);
+  procedure   borrar(xid: string);
+  procedure   getobject(xid: string);
+
+  function    buscarosdet(xid, xcodos: string): boolean; overload;
+  function    guardarosdet(xid, xcodos: string): boolean;
+  procedure   borrarosdet(xid, xcodos: string);
+  function    buscarosdet(xcodos: string): boolean; overload;
+
+  function    getObrasAgrupadas: TQuery;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+end;
+
+function osagrupa: TTAgrupaOSFacturar;
+
+implementation
+
+var
+  xosagrupa: TTAgrupaOSFacturar = nil;
+
+constructor TTAgrupaOSFacturar.Create;
+begin
+  tabla := datosdb.openDB('obsocial_cab', '');
+  detos := datosdb.openDB('obsocial_det', '');
+end;
+
+destructor TTAgrupaOSFacturar.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function    TTAgrupaOSFacturar.buscar(xid: string): boolean;
+begin
+  result := tabla.FindKey([xid]);
+end;
+
+procedure   TTAgrupaOSFacturar.guardar(xid, xnombre, xcuit, xdireccion, xlocalidad, xcodpfis: string; xtope: integer);
+begin
+  if (buscar(xid)) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('id').AsString        := xid;
+  tabla.FieldByName('nombre').AsString    := xnombre;
+  tabla.FieldByName('cuit').AsString      := xcuit;
+  tabla.FieldByName('direccion').AsString := xdireccion;
+  tabla.FieldByName('localidad').AsString := xlocalidad;
+  tabla.FieldByName('codpfis').AsString   := xcodpfis;
+  tabla.FieldByName('tope').AsInteger     := xtope;
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+  datosdb.closeDB(tabla); tabla.Open;
+end;
+
+procedure   TTAgrupaOSFacturar.borrar(xid: string);
+begin
+  if (buscar(xid)) then begin
+    tabla.Delete;
+    datosdb.closeDB(tabla); tabla.Open;
+  end;
+end;
+
+procedure   TTAgrupaOSFacturar.getobject(xid: string);
+begin
+  if (buscar(xid)) then begin
+    id        := tabla.FieldByName('id').AsString;
+    nombre    := tabla.FieldByName('nombre').AsString;
+    cuit      := tabla.FieldByName('cuit').AsString;
+    direccion := tabla.FieldByName('direccion').AsString;
+    localidad := tabla.FieldByName('localidad').AsString;
+    codpfis   := tabla.FieldByName('codpfis').AsString;
+    tope      := tabla.FieldByName('tope').AsInteger;
+  end else begin
+    id := ''; nombre := ''; cuit := ''; direccion := ''; localidad := ''; codpfis := ''; tope := 0;
+  end;
+end;
+
+function TTAgrupaOSFacturar.buscarosdet(xid, xcodos: string): boolean;
+begin
+  result := datosdb.Buscar(detos, 'id', 'codos', xid, xcodos);
+end;
+
+function TTAgrupaOSFacturar.buscarosdet(xcodos: string): boolean;
+begin
+  detos.IndexFieldNames := 'CODOS';
+  result := detos.FindKey([xcodos]);
+  detos.IndexFieldNames := 'ID;CODOS';
+end;
+
+function TTAgrupaOSFacturar.guardarosdet(xid, xcodos: string): boolean;
+begin
+  getobject(xid);
+  datosdb.Filtrar(detos, 'id = ' + '''' + xid + '''');
+  if (detos.RecordCount < tope) then begin
+    if (buscarosdet(xid, xcodos)) then detos.Edit else detos.Append;
+    detos.FieldByName('id').AsString    := xid;
+    detos.FieldByName('codos').AsString := xcodos;
+    try
+      detos.Post
+     except
+      detos.Cancel
+    end;
+    datosdb.closeDB(detos); detos.open;
+    result := true;
+  end else
+    result := false;
+end;
+
+procedure TTAgrupaOSFacturar.borrarosdet(xid, xcodos: string);
+begin
+  if (buscarosdet(xid, xcodos)) then begin
+    detos.Delete;
+    datosdb.closeDB(detos);
+  end;
+end;
+
+function TTAgrupaOSFacturar.getObrasAgrupadas: TQuery;
+begin
+  result := datosdb.tranSQL('select id, nombre from ' + tabla.TableName);
+end;
+
+procedure TTAgrupaOSFacturar.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.open;
+    if not detos.Active then detos.open;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTAgrupaOSFacturar.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    datosdb.closeDB(detos);
+  end;
+end;
+
+{===============================================================================}
+
+function osagrupa: TTAgrupaOSFacturar;
+begin
+  if xosagrupa = nil then
+    xosagrupa := TTAgrupaOSFacturar.Create;
+  Result := xosagrupa;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xosagrupa.Free;
+
+end.

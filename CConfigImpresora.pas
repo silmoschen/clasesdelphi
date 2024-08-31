@@ -1,0 +1,414 @@
+unit CConfigImpresora;
+
+interface
+
+uses Printers, CBDT, SysUtils, DB, DBTables, CUtiles, CIDBFM, StdCtrls;
+
+type
+
+TTConfigImpresora = class(TObject)            // Superclase
+  nimpresora: string; impDefecto, ImprimeEnModoTexto: boolean;
+  miz, msu, mde, min, orient, alto, ancho, resol: real;
+  alto_pagina, largo_pagina: real; LineasModoTexto: ShortInt;
+  ResolucionImpresora: Integer;
+  imprInst, Puerto: string;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    getIAlto: real;
+  function    getIAncho: real;
+  function    getIXDefecto: boolean;
+
+  procedure   Grabar(ximpresora: string; xmiz, xmsu, xmde, xmin, xorientacion, xalto, xancho, xresol: real);
+  procedure   Borrar(ximpresora: string); overload;
+  procedure   Borrar; overload;
+  procedure   cfgImpresora(modo: string);
+  procedure   getDatos(ximpresora: string); overload;
+  procedure   getDatos(ximpresora, xresolucion: string); overload;
+  function    ImpresoraXDefecto: string;
+  function    Buscar(ximpr: string): boolean;
+  procedure   fijarIxDefecto(i: string);
+  {****************************************************************************}
+  function    VerifImprInstalada: boolean;
+  procedure   SeleccionarImpresora(ximpresora: integer; xnombre: string);
+  function    ext_resolucion(salida: char): integer;
+  function    ext_Impresora: string;
+  function    resolucion(salida: char): integer; overload;
+  function    resolucion(xresolucion: integer; salida: char): integer; overload;
+  function    Ext_Margen(salida: char; margen: string): integer;
+  function    Alto_Pag: integer;
+  function    Largo_Pag: integer;
+  {****************************************************************************}
+  procedure   ParametrosImpresionModoTexto(ximpresora, xpuerto: String; ximprime, xaltopag: ShortInt);
+  {****************************************************************************}
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  impresoraSeleccionada: Boolean;
+end;
+
+function impresora: TTConfigImpresora;
+
+implementation
+
+var
+  xconfigimpresora: TTConfigImpresora = nil;
+
+{===============================================================================}
+
+constructor TTConfigImpresora.Create;
+var
+  archivo: TextFile;
+begin
+  tabla := datosdb.openDB('ctrlprn', '', '', dbs.DirSistema);
+  conectar;
+
+  Puerto := 'LPT1';
+  if FileExists(dbs.DirSistema + '\impresoratxt.dat') then Begin
+    AssignFile(archivo, dbs.DirSistema + '\impresoratxt.dat');
+    Reset(archivo);
+    ReadLn(archivo, puerto);
+    CloseFile(archivo);
+  end;
+
+  ResolucionImpresora := 7;
+end;
+
+destructor TTConfigImpresora.Destroy;
+begin
+  desconectar;
+  inherited destroy;
+end;
+
+function TTConfigImpresora.getIAlto: real;
+begin
+  Result := printer.PageHeight;
+end;
+
+function TTConfigImpresora.getIAncho: real;
+begin
+  Result := printer.PageWidth;
+end;
+
+function TTConfigImpresora.getIXDefecto: boolean;
+begin
+  if tabla.FieldByName('defecto').AsString = 'X' then Result := True else Result := False;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TTConfigImpresora.getDatos(ximpresora: string);
+// Objetivo...: Cargar los datos de la impresora seleccionada
+begin
+  tabla.Refresh;
+  if tabla.FindKey([ximpresora]) then Begin
+    nimpresora := ximpresora;
+    miz       := tabla.FieldByName('m_izquierdo').AsFloat;
+    msu       := tabla.FieldByName('m_superior').AsFloat;
+    mde       := tabla.FieldByName('m_derecho').AsFloat;
+    min       := tabla.FieldByName('m_inferior').AsFloat;
+    orient    := tabla.FieldByName('orientacion').AsFloat;
+    resol     := tabla.FieldByName('resolucion').AsFloat;
+    alto      := tabla.FieldByName('alto').AsFloat;
+    ancho     := tabla.FieldByName('ancho').AsFloat;
+    if tabla.FieldByName('ModoTexto').AsInteger = 1 then ImprimeEnModoTexto := True else ImprimeEnModoTexto := False;
+    LineasModoTexto := tabla.FieldByName('altopag').AsInteger;
+    if msu <= 0 then msu := 1;
+    if miz <= 0 then miz := 1;
+    if tabla.FieldByName('defecto').AsString = 'X' then impDefecto := True else impDefecto := False;
+  end else Begin
+    miz := 1; msu := 1; mde := 0; min := 0; orient := 0; alto := 0; ancho := 0; resol := 0; impDefecto := False; nimpresora := ''; ImprimeEnModoTexto := False; LineasModoTexto := 65;
+  end;
+  impresoraSeleccionada := False;
+end;
+
+procedure TTConfigImpresora.getDatos(ximpresora, xresolucion: string);
+// Objetivo...: Cargar los datos de la impresora seleccionada
+begin
+  getDatos(ximpresora);
+  if Length(Trim(xresolucion)) > 0 then resol := StrToFloat(xresolucion) else resol := 600;
+  nimpresora := ximpresora;
+  impresoraSeleccionada := True;
+  //utiles.msgError(xresolucion);
+end;
+
+procedure TTConfigImpresora.cfgImpresora(modo: string);
+// Objetivo...: Configurar el modo de la Impresora
+begin
+  if modo = 'V' then printer.Orientation := poPortrait;
+  if modo = 'H' then printer.Orientation := poLandscape;
+  if modo = 'H' then Begin
+    ancho := tabla.FieldByName('alto').AsFloat;
+    alto  := tabla.FieldByName('ancho').AsFloat;
+  end;
+end;
+
+function  TTConfigImpresora.ImpresoraXDefecto: string;
+  // Objetivo...: Cargamos la Información de la Impresora por Defecto
+  var
+    i: string;
+begin
+  i := tabla.FieldByName('impresora').AsString;
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      if tabla.FieldByName('defecto').AsString = 'X' then
+        begin
+          i := tabla.FieldByName('impresora').AsString;
+          getDatos(tabla.FieldByName('impresora').AsString);
+          Break;
+        end;
+      tabla.Next;
+    end;
+  getDatos(i);
+  Result := i
+end;
+
+procedure TTConfigImpresora.Grabar(ximpresora: string; xmiz, xmsu, xmde, xmin, xorientacion, xalto, xancho, xresol: real);
+begin
+  if tabla.FindKey([ximpresora]) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('impresora').AsString  := ximpresora;
+  tabla.FieldByName('m_izquierdo').AsFloat := xmiz;
+  tabla.FieldByName('m_superior').AsFloat  := xmsu;
+  tabla.FieldByName('m_derecho').AsFloat   := xmde;
+  tabla.FieldByName('m_inferior').AsFloat  := xmin;
+  tabla.FieldByName('orientacion').AsFloat := xorientacion;
+  tabla.FieldByName('alto').AsFloat        := xalto;
+  tabla.FieldByName('ancho').AsFloat       := xancho;
+  tabla.FieldByName('resolucion').AsFloat  := xresol;
+  try
+    tabla.Post;
+    tabla.Refresh;
+    getDatos(ximpresora);    // Cargamos los datos de la Nueva Impresora
+  except
+    tabla.Cancel;
+  end;
+end;
+
+procedure TTConfigImpresora.ParametrosImpresionModoTexto(ximpresora, xpuerto: String; ximprime, xaltopag: ShortInt);
+var
+  archivo: TextFile;
+begin
+  if tabla.FindKey([ximpresora]) then Begin
+    tabla.Edit;
+    tabla.FieldByName('ModoTexto').AsInteger := ximprime;
+    tabla.FieldByName('AltoPag').AsInteger   := xaltopag;
+    try
+      tabla.Post;
+      getDatos(ximpresora);
+     except
+      tabla.Cancel
+    end;
+  end;
+
+  if Length(Trim(xpuerto)) = 0 then puerto := 'LPT1' else puerto := xpuerto;
+  AssignFile(archivo, dbs.DirSistema + '\impresoratxt.dat');
+  Rewrite(archivo);
+  WriteLn(archivo, puerto);
+  CloseFile(archivo);
+end;
+
+procedure TTConfigImpresora.Borrar(ximpresora: string);
+begin
+  if tabla.FindKey([ximpresora]) then
+  try
+    tabla.Delete;
+    getDatos(tabla.FieldByName('impresora').AsString);
+  except
+  end;
+end;
+
+procedure TTConfigImpresora.Borrar;
+// Objetivo...: Borrar todas las impresoras
+begin
+  datosdb.tranSQL(dbs.DirSistema, 'DELETE FROM ctrlprn');
+end;
+
+procedure TTConfigImpresora.fijarIxDefecto(i: string);
+begin
+  // Anulamos la otra Impresora, si es que existe
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      if tabla.FieldByName('defecto').AsString = 'X' then
+        begin
+          tabla.Edit;
+          tabla.FieldByName('defecto').AsString := '';
+          try
+            tabla.Post;
+          except
+            tabla.Cancel;
+          end;
+        end;
+      tabla.Next;
+    end;
+
+  // Fijamos la nueva Impresora
+  if tabla.FindKey([i]) then
+   begin
+     tabla.Edit;
+     tabla.FieldByName('defecto').AsString := 'X';
+     try
+       tabla.Post;
+     except
+       tabla.Cancel;
+     end;
+   end;
+end;
+
+function  TTConfigImpresora.Buscar(ximpr: string): boolean;
+begin
+  if tabla.FindKey([ximpr]) then Result := True else Result := False;
+end;
+
+{*******************************************************************************}
+function TTConfigImpresora.VerifImprInstalada: boolean;
+// Objetivo...: Determinar si hay Impresoras Instaladas
+begin
+  if tabla.RecordCount > 0 then
+    begin
+      if Length(Trim(nimpresora)) = 0 then ext_Impresora;  // Inicializamos la Impresora
+      Result := True
+    end
+  else
+      Result := False;
+end;
+
+function TTConfigImpresora.ext_Impresora: string;
+// Objetivo...: Extraer la Impresora por Defecto
+begin
+  imprInst := tabla.FieldByName('impresora').AsString;   // Por omisión tomamos la primera
+  ImpresoraXDefecto;
+  if Length(trim(tabla.FieldByName('impresora').AsString)) > 0 then imprInst := tabla.FieldByName('impresora').AsString;
+  Result := imprInst;
+end;
+
+function TTConfigImpresora.ext_resolucion(salida: char): integer;
+// Objetivo...: Extraer la Resolución de la Impresora Seleccionada
+begin
+  Result := tabla.FieldByName('resolucion').AsInteger;
+end;
+
+function TTConfigImpresora.resolucion(salida: char): integer;
+// Objetivo...: Determinar la resolución de Pixeles por cm
+var
+  res_cm: real;
+begin
+  if salida = 'I' then
+    begin
+      res_cm := (ext_resolucion(salida) / 2.54) / 10;
+      Result := StrToInt(FormatFloat('#####', res_cm));
+    end
+  else
+    begin
+      res_cm := 7;
+      Result := 7;
+    end;
+
+  ResolucionImpresora := StrToInt(FormatFloat('#####', (ext_resolucion(salida) / 2.54) / 10));
+  if ResolucionImpresora = 0 then ResolucionImpresora := 7;
+end;
+
+function TTConfigImpresora.resolucion(xresolucion: integer; salida: char): integer;
+// Objetivo...: Determinar la resolución de Pixeles por cm
+var
+  res_cm: real;
+begin
+  //if not impresoraSeleccionada then ext_Impresora;  // Inicializamos la Impresora, si es que ya No fue Seleccionada
+  if salida = 'I' then
+    begin
+      res_cm := (xresolucion / 2.54) / 10;
+      Result := StrToInt(FormatFloat('#####', res_cm));
+    end
+  else
+    begin
+      {res_cm := round(186 / 2.54) / 10;
+      Result := StrToInt(FormatFloat('#####', res_cm));}
+      Result := 7;
+    end;
+end;
+
+function TTConfigImpresora.Ext_Margen(salida: char; margen: string): integer;
+// Objetivo...: Determinar la distancia para los Márgenes
+var
+  res_cm, vmargen, xm: real;
+begin
+  // Extraemos el márgen
+  vmargen := 0;
+
+  // Para Orientación Normal
+  if printer.Orientation = poPortrait then
+    begin
+      if margen = 'MI' then vmargen := miz;  // Extraemos el Margen Izquierdo
+      if margen = 'MS' then vmargen := msu;  // Extraemos el Margen Superior
+    end;
+
+  // Para Orientación Apaisada - Borde Izquierdo = Superior, Borde Superior = Izquierdo
+  if printer.Orientation = poLandscape then
+    begin
+      if margen = 'MS' then vmargen := miz;  // Extraemos el Margen Izquierdo
+      if margen = 'MI' then vmargen := msu;  // Extraemos el Margen Superior
+    end;
+
+  xm     := miz;
+  if xm = 0 then xm := 1; // Si no se definieron márgenes, lo ponemos en 1
+  res_cm := ((ext_resolucion(salida) / 2.54) * (xm * 0.01));
+  // Convertimos en Pixeles los milimetros
+  if vmargen > 0 then Result := Round(res_cm) else Result := Round(res_cm);
+end;
+
+function TTConfigImpresora.Alto_Pag: integer;
+// Objetivo...: Devolver el alto de la Página
+begin
+  Result := StrToInt(FloatToStr(alto));
+end;
+
+function TTConfigImpresora.Largo_Pag: integer;
+// Objetivo...: Devolver el alto de la Página
+begin
+  Result := StrToInt(FloatToStr(ancho));
+end;
+
+procedure TTConfigImpresora.SeleccionarImpresora(ximpresora: integer; xnombre: string);
+// Objetivo...: Especificar la impresora a imprimir
+begin
+  Printer.PrinterIndex := ximpresora;
+  if (length(trim(xnombre)) > 0) then getDatos(xnombre);
+end;
+{*******************************************************************************}
+
+procedure TTConfigImpresora.conectar;
+// Objetivo...: conectar tabla de persistencia - Impresora
+begin
+  if conexiones = 0 then
+    if not tabla.Active then tabla.Open;
+  Inc(conexiones);
+end;
+
+procedure TTConfigImpresora.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tabla);
+end;
+
+{===============================================================================}
+
+function impresora: TTConfigImpresora;
+begin
+  if xconfigimpresora = nil then
+    xconfigimpresora := TTConfigImpresora.Create;
+  Result := xconfigimpresora;
+end;
+
+initialization
+
+finalization
+  xconfigimpresora.Free;
+
+end.

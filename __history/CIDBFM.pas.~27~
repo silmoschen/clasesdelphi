@@ -1,0 +1,660 @@
+// Objetivo...: Clase que maneja tareas comunes aplicadas a bases de datos relacionales
+// Version....: 1.0
+// Autor......: Silvio Moschen
+// Heredada de: Superclase
+
+unit CIDBFM;
+
+interface
+
+uses CUtiles, CBDT, DB, DBTables, SysUtils, Windows, Dialogs, DBIProcs,
+     DBITypes, FileCtrl, Classes;
+
+type
+
+TTCIDBFM = class(TObject)          // Clase Base
+  setSQL: TQuery;
+  tabla : TTable;
+  origenDatos, origenDat: string;
+  intervalorefresco: integer;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    openDB(idtabla, indiceactivo: string): TTable; overload;
+  function    openDB(idtabla, indiceactivo, id_idxact: string): TTable; overload;
+  function    openDB(idtabla, indiceactivo, sesion, privatedir: string): TTable; overload;
+  function    openDB(idtabla, indiceactivo, id_idxact, sesion, privatedir: string): TTable; overload;
+  function    openSQL: TQuery; overload;
+
+  procedure   closeDB(tabla: TTable);
+
+  function    tranSQL(xsql: string): TQuery; overload;
+  procedure   TransacSQLBatch(lote: TStringList);
+  function    getTransacSQL(strSQL: String): TQuery;
+  function    tranSQL(xpath, xsql: string): TQuery; overload;
+  function    tranSQL_StoredProc(xsql, xparametro, xvalorparametro: string): TQuery;
+  function    locSQL(xsql: string): TQuery;
+  function    rSQL(xsql: string): TQuery;
+  function    Filtrar(tabla: TTable; exprfiltro: string): TTable; overload;
+  function    Filtrar(rSQL: TQuery; exprfiltro: string): TQuery; overload;
+  procedure   QuitarFiltro(tabla: TTable);
+  procedure   QuitarFiltroSQL(rSQL: TQuery);
+  function    verificarSiExisteCampo(tabla, campo, directorio: String): Boolean; overload;
+  function    verificarSiExisteCampo(tabla: TTable; campo: String): Boolean; overload;
+  function    verificarSiExisteIndice(tabla, indice, directorio: String): Boolean;
+  function    verificarSiExisteTabla(xtabla: String): Boolean; overload;
+  function    verificarSiExisteTabla(xtabla: String; xdb: TDataBase): Boolean; overload;
+  function    verificarSiExisteCampoSQL(tabla: TQuery; campo: String): Boolean;
+
+  function    crearStoredProc(xbasedatos, xprocedimiento: String): TStoredProc; overload;
+  function    crearStoredProc(xbasedatos, xprocedimiento, xparametro, xvalor_parametro: String): TStoredProc; overload;
+  procedure   cerrarStoredProc(xproc: TStoredProc);
+
+  function    Buscar(tabla: TTable; c1, v1: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, v1, v2: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, v1, v2, v3: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, c4, v1, v2, v3, v4: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, c4, c5, v1, v2, v3, v4, v5: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, v1, v2, v3, v4, v5, v6: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, c7, v1, v2, v3, v4, v5, v6, v7: string): boolean; overload;
+  function    Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, c7, c8, v1, v2, v3, v4, v5, v6, v7, v8: string): boolean; overload;
+
+  procedure   BuscarEnFormaContextual(tabla: TTable; c1, c2, v1, v2: string);
+
+  procedure   refrescar(tabla: TTable);
+  procedure   vaciarBuffer(tabla: TTable);
+
+  procedure   origenDT(xorigenDatos: string);
+
+  procedure   PackTParadox; overload;
+  procedure   PackTParadox(tabla: string); overload;
+  procedure   PackDirectorio(xdir: string);
+
+  procedure   RegeneraIdx; overload;
+ private
+  { Declaraciones Privadas }
+  stp: TStoredProc;
+  procedure   PackParadox(ADatabase, ATable : String);
+  procedure   RegeneraIdx(ADatabase, ATable : String); overload;
+end;
+
+function datosdb: TTCIDBFM;
+
+implementation
+
+var
+  xdatosdb: TTCIDBFM = nil;
+
+constructor TTCIDBFM.Create;
+begin
+  inherited Create;
+  //intervalorefresco := dbs.intervalorefresco;
+end;
+
+destructor TTCIDBFM.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function TTCIDBFM.openDB(idtabla, indiceactivo: string): TTable;
+// Objetivo...: inicializar una tabla de persistencia de objetos
+begin
+  //utiles.msgError(idtabla); 
+  tabla := TTable.Create(nil);                    // Constructor
+  tabla.DatabaseName := dbs.TDB.DatabaseName;
+  tabla.TableName    := idtabla; if Length(trim(indiceactivo)) > 0 then tabla.IndexDefs.Update;
+  if Length(trim(indiceactivo)) > 0 then tabla.IndexFieldNames := indiceactivo;  // Indice primario
+  tabla.AutoRefresh  := True;
+  Result := tabla;
+end;
+
+function TTCIDBFM.openDB(idtabla, indiceactivo, sesion, privatedir: string): TTable;
+// Objetivo...: inicializar una tabla de persistencia de objetos - tomando como parámetros la información de la sesión de datos a gestionar
+begin
+  tabla := TTable.Create(nil);                    // Constructor
+  tabla.DatabaseName := privatedir;
+  tabla.TableName := idtabla; tabla.IndexDefs.Update;
+  if Length(trim(indiceactivo)) > 0 then tabla.IndexFieldNames := indiceactivo;  // Indice primario
+  Result := tabla;
+end;
+
+function TTCIDBFM.openDB(idtabla, indiceactivo, id_idxact: string): TTable;
+// Objetivo...: inicializar una tabla de persistencia de objetos - tomando como parámetros los campos y el indice activo
+begin
+  tabla := nil;
+  tabla := TTable.Create(nil);                    // Constructor
+  tabla.DatabaseName := dbs.TDB.DatabaseName;
+  tabla.TableName := idtabla; tabla.IndexDefs.Update;
+  if Length(trim(indiceactivo)) > 0 then tabla.IndexFieldNames := indiceactivo;  // Indice primario
+  if Length(trim(id_idxact)) > 0 then tabla.IndexName := id_idxact;  // Indice primario
+  Result := tabla;
+end;
+
+function TTCIDBFM.openDB(idtabla, indiceactivo, id_idxact, sesion, privatedir: string): TTable;
+// Objetivo...: inicializar una tabla de persistencia de objetos - tomando como parámetros los campos y el indice activo
+begin
+  tabla := nil;
+  tabla := TTable.Create(nil);                    // Constructor
+  tabla.DatabaseName := privatedir;
+  tabla.TableName := idtabla; tabla.IndexDefs.Update;
+  if Length(trim(indiceactivo)) > 0 then tabla.IndexFieldNames := indiceactivo;  // Indice primario
+  if Length(trim(id_idxact)) > 0 then tabla.IndexName := id_idxact;  // Indice primario
+  Result := tabla;
+end;
+
+function  TTCIDBFM.openSQL: TQuery;
+// Objetivo...: Inicializar un objeto del tipo TQuery
+begin
+  setSQL := TQuery.Create(nil);
+  setSQL.DatabaseName := dbs.baseDat;
+  Result := setSQL;
+end;
+
+procedure TTCIDBFM.closeDB(tabla: TTable);
+// Objetivo...: cerrar una tabla de persistencia de objetos
+begin
+  if tabla.Active then Begin
+    tabla.Filtered := False;
+    refrescar(tabla);
+    vaciarBuffer(tabla);
+    tabla.Close; tabla := nil; tabla.Free;
+  end;
+end;
+
+procedure TTCIDBFM.refrescar(tabla: TTable);
+// Objetivo...: refrescar los datos de una tabla
+begin
+  if dbs.BaseClientServ = 'N' then vaciarBuffer(tabla);
+  if dbs.BaseClientServ = 'N' then
+    if tabla.Active then tabla.Refresh;
+  //if dbs.BaseClientServ = 'N' then Check(DbiSaveChanges(tabla.Handle));
+end;
+
+procedure TTCIDBFM.vaciarBuffer(tabla: TTable);
+// Objetivo...: implementar mecanismos de vaciado de buffer, volcar el contenido de las tablas al disco - para tablas DBase, Paradox
+begin
+  if tabla <> Nil then
+    if (dbs.BaseClientServ = 'N') and (Pos('\', tabla.DatabaseName) > 0) then
+      if tabla.Active then tabla.FlushBuffers;  // Si la persistencia es en tablas nativas vaciamos el buffer
+end;
+
+function TTCIDBFM.tranSQL(xsql: string): TQuery;
+// Objetivo...: procesar una transacción SQL
+begin
+  setSQL := nil;
+  setSQL := openSQL;
+  Result := rSQL(xsql);
+end;
+
+procedure TTCIDBFM.TransacSQLBatch(lote: TStringList);
+// Objetivo...: ejecutar una lote consultas SQL
+var
+  i: integer;
+begin
+  setSQL := TQuery.Create(nil);
+  setSQL.DatabaseName := dbs.TDB.DatabaseName;
+  for i := 0 to lote.Count - 1 do begin
+    setSQL.SQL.Clear;
+    setSQL.SQL.Add(lote[i]);
+    try
+      setSQL.ExecSQL;
+     except
+      on E: Exception do utiles.msgError(E.Message);
+    end;
+  end;
+  lote.Clear;
+  setSQL := nil;
+  exit;
+
+
+  setSQL := TQuery.Create(nil);
+  setSQL.SQL.Clear; setSQL.Close;
+  setSQL.SQL := lote;
+  setSQL.Prepare;
+  try
+    setSQL.ExecSQL;
+   except
+    on E: Exception do utiles.msgError(E.Message);
+  end;
+  setSQL.UnPrepare;
+  lote.Clear;
+  setSQL := nil;
+end;
+
+function TTCIDBFM.getTransacSQL(strSQL: String): TQuery;
+// Objetivo...: ejecutar una lote consultas SQL
+begin
+  Result := tranSQL(strSQL);
+end;
+
+function TTCIDBFM.tranSQL(xpath, xsql: string): TQuery;
+// Objetivo...: ejecutar una consulta SQL en un Directorio Específico
+begin
+  {if Pos('\', xpath) > 0 then
+    if not DirectoryExists(xpath) then utiles.msgerror(xsql + '   ' + xpath);}
+  if Length(Trim(xpath)) > 0 then Begin
+    setSQL := TQuery.Create(nil);
+    setSQL.DatabaseName := xpath;
+    Result := rSQL(xsql);
+   end
+  else
+    Result := tranSQL(xsql);
+end;
+
+function TTCIDBFM.tranSQL_StoredProc(xsql, xparametro, xvalorparametro: string): TQuery;
+// Objetivo...: ejecutar una consulta SQL de manera como en un procedimiento almacenado
+Begin
+  setSQL := TQuery.Create(nil);
+  setSQL.Prepare;
+  setSQL.ParamByName(xparametro).AsString := xparametro;
+  Result := rSQL(xsql);
+  setSQL := nil;
+end;
+
+function TTCIDBFM.locSQL(xsql: string): TQuery;
+// Objetivo...: ejecutar una consulta SQL de manera local, en el directorio actual
+begin
+  setSQL := TQuery.Create(nil);
+  Result := rSQL(xsql);
+  setSQL := nil;
+end;
+
+function TTCIDBFM.rSQL(xsql: string): TQuery;
+// Objetivo...: procesar y devolver el resultado SQL de una transacción
+begin
+  //utiles.msgerror(xsql);
+  setSQL.SQL.Clear; setSQL.Close;
+  setSQL.SQL.Add(xsql);
+  setSQL.ExecSQL;
+  try
+    Result := setSQL;
+   except
+    on E: Exception do utiles.msgError(xsql + ' ' + E.Message + chr(13) + xsql);
+  end;
+  setSQL := nil;
+end;
+
+function TTCIDBFM.Filtrar(tabla: TTable; exprfiltro: string): TTable;
+// Objetivo...: Filtrar y devolver un set de registros de una tabla
+begin
+  tabla.Filtered := False;
+  tabla.Filter   := exprfiltro;
+  tabla.Filtered := True;
+  Result         := tabla;
+end;
+
+function TTCIDBFM.Filtrar(rSQL: TQuery; exprfiltro: string): TQuery;
+// Objetivo...: Filtrar y devolver un set de registros de una consulta SQL
+begin
+  rSQL.Filtered := False;
+  rSQL.Filter   := exprfiltro;
+  rSQL.Filtered := True;
+  Result := rSQL;
+end;
+
+procedure TTCIDBFM.QuitarFiltro(tabla: TTable);
+// Objetivo...: Quitar el filtro de una tabla
+begin
+  tabla.Filtered := False;
+  tabla.Filter   := '';
+end;
+
+procedure TTCIDBFM.QuitarFiltroSQL(rSQL: TQuery);
+// Objetivo...: Quitar el filtro de una consulta
+begin
+  rSQL.Filtered := False;
+  rSQL.Filter   := '';
+end;
+
+function TTCIDBFM.verificarSiExisteCampo(tabla, campo, directorio: String): Boolean;
+var
+  t: TTable;
+  i: Integer;
+Begin
+  //utiles.msgError(tabla + '  ' + campo + '  ' + directorio);
+  Result := False;
+  t := openDB(tabla, '', '', directorio);
+  t.Open;
+  For i := 1 to t.FieldCount do
+    if lowercase(t.Fields[i-1].DisplayName) = lowercase(campo) then Begin
+      Result := True;
+      Break;
+    end;
+  t.Close; t.Free;
+end;
+
+function TTCIDBFM.verificarSiExisteCampo(tabla: TTable; campo: String): Boolean;
+// Objetivo...: Quitar Filtro
+var
+  i: Integer;
+begin
+  Result := False;
+  //if (campo = 'ref1') then utiles.msgerror(lowercase(campo) + '  ' + inttostr(tabla.FieldCount));
+  for i := 0 to tabla.FieldCount - 1 do Begin
+    if lowercase(tabla.FieldDefs[i].Name) = lowercase(campo) then Begin
+      Result := True;
+      Break;
+    end;
+  end;
+end;
+
+function TTCIDBFM.verificarSiExisteIndice(tabla, indice, directorio: String): Boolean;
+var
+  t: TTable;
+  i: Integer;
+Begin
+  Result := False;
+  t := openDB(tabla, '', '', directorio);
+  t.Open;
+  For i := 1 to t.IndexDefs.Count  do
+    if lowercase(t.IndexDefs.Items[i-1].Name) = lowercase(indice) then Begin
+      Result := True;
+      Break;
+    end;
+  t.Close; t.Free;
+end;
+
+function TTCIDBFM.verificarSiExisteCampoSQL(tabla: TQuery; campo: String): Boolean;
+// Objetivo...: Verificar SQL
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 0 to tabla.FieldCount - 1 do Begin
+    if lowercase(tabla.FieldDefs[i].Name) = lowercase(campo) then Begin
+      Result := True;
+      Break;
+    end;
+  end;
+end;
+
+function TTCIDBFM.crearStoredProc(xbasedatos, xprocedimiento: String): TStoredProc;
+// Objetivo...: Crear un objeto para manejar procedimientos almacenados
+Begin
+  stp                := TStoredProc.Create(nil);
+  stp.DatabaseName   := xbasedatos;
+  stp.StoredProcName := xprocedimiento;
+  stp.Prepare;
+  Result             := stp;
+end;
+
+function TTCIDBFM.crearStoredProc(xbasedatos, xprocedimiento, xparametro, xvalor_parametro: String): TStoredProc;
+// Objetivo...: Crear un objeto para manejar procedimientos almacenados, con un argumento
+Begin
+  crearStoredProc(xbasedatos, xprocedimiento);
+  stp.ParamByName(xparametro).AsString := xvalor_parametro;
+  stp.ExecProc;
+  Result             := stp;
+end;
+
+procedure TTCIDBFM.cerrarStoredProc(xproc: TStoredProc);
+// Objetivo...: Crear un objeto para manejar procedimientos almacenados
+Begin
+  xproc.Close;
+  xproc.Free;
+end;
+
+//------------------------------------------------------------------------------
+// Funciones de búsqueda - sobrecargadas
+function TTCIDBFM.Buscar(tabla: TTable; c1, v1: string): boolean;
+// Objetivo...: Buscar dos atributos en una tabla
+begin
+  Result := tabla.FindKey([v1]);
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, v1, v2: string): boolean;
+// Objetivo...: Buscar dos atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, v1, v2, v3: string): boolean;
+// Objetivo...: Buscar tres atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, c4, v1, v2, v3, v4: string): boolean;
+// Objetivo...: Buscar cuatro atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  tabla.FieldByName(c4).AsString := v4;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, c4, c5, v1, v2, v3, v4, v5: string): boolean;
+// Objetivo...: Buscar cinco atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  tabla.FieldByName(c4).AsString := v4;
+  tabla.FieldByName(c5).AsString := v5;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, v1, v2, v3, v4, v5, v6: string): boolean;
+// Objetivo...: Buscar seis atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  tabla.FieldByName(c4).AsString := v4;
+  tabla.FieldByName(c5).AsString := v5;
+  tabla.FieldByName(c6).AsString := v6;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, c7, v1, v2, v3, v4, v5, v6, v7: string): boolean;
+// Objetivo...: Buscar siete atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  tabla.FieldByName(c4).AsString := v4;
+  tabla.FieldByName(c5).AsString := v5;
+  tabla.FieldByName(c6).AsString := v6;
+  tabla.FieldByName(c7).AsString := v7;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+function TTCIDBFM.Buscar(tabla: TTable; c1, c2, c3, c4, c5, c6, c7, c8, v1, v2, v3, v4, v5, v6, v7, v8: string): boolean;
+// Objetivo...: Buscar siete atributos en una tabla
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.FieldByName(c3).AsString := v3;
+  tabla.FieldByName(c4).AsString := v4;
+  tabla.FieldByName(c5).AsString := v5;
+  tabla.FieldByName(c6).AsString := v6;
+  tabla.FieldByName(c7).AsString := v7;
+  tabla.FieldByName(c8).AsString := v8;
+  if tabla.GotoKey then Result := True else Result := False;
+end;
+
+procedure TTCIDBFM.BuscarEnFormaContextual(tabla: TTable; c1, c2, v1, v2: string);
+// Objetivo...: Buscar dos atributos en una tabla - en Forma contextual
+begin
+  if not tabla.Active then tabla.Open;
+  tabla.SetKey;
+  tabla.FieldByName(c1).AsString := v1;
+  tabla.FieldByName(c2).AsString := v2;
+  tabla.GotoNearest;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TTCIDBFM.origenDT(xorigenDatos: string);
+// Objetivo...: definir alguna fuente para el origen de los datos
+begin
+  origenDatos := xorigenDatos;
+  if origenDatos <> 'NN' then origenDat := origenDatos else origenDat := '';
+end;
+
+procedure TTCIDBFM.PackParadox(ADatabase, ATable : String);
+// Objetivo...: Compactar tablas Paradox - Pack
+var
+  ADB      : TDataBase;
+  SaveKC   : Boolean;
+  PdxStruct: CRTblDesc;
+begin
+with TTable.Create(nil) do
+  try
+    DatabaseName := ADatabase;
+    TableName := ATable;
+    Exclusive := True;
+    Open;
+    ADB := DAtabase;
+    SaveKC := ADB.KeepConnection;
+    ADB.KeepConnection := True;
+    try
+      Close;
+      FillChar(PdxStruct,SizeOF(PdxStruct),0);
+      StrPCopy(PdxStruct.szTblName,ATable);
+      PdxStruct.bPack := True;
+      Check(DbiDoRestructure(ADB.Handle,1, @PdxStruct,nil,nil,nil,False));
+    finally
+     ADB.KeepConnection := SaveKC;
+    end;
+  finally
+   Free;
+  end;
+end;
+
+procedure TTCIDBFM.PackTParadox;
+// Objetivo...: recorrer un directorio, extraer las tablas Paradox y llamar a la rutina de compactación
+var
+  DirInfo: TSearchRec; r: Integer;
+begin
+    if dbs.BaseClientServ = 'N' then Begin
+    r := FindFirst(dbs.baseDat + '\*.db', FaAnyfile, DirInfo);
+    while r = 0 do  begin
+      if LowerCase(Copy(pChar(DirInfo.Name), 1, 7)) <> 'usuario' then PackParadox(dbs.baseDat, pChar(DirInfo.Name));
+      r := FindNext(DirInfo);
+    end;
+  end;
+end;
+
+procedure TTCIDBFM.PackDirectorio(xdir: string);
+// Objetivo...: recorrer un directorio, extraer las tablas Paradox y llamar a la rutina de compactación
+var
+  DirInfo: TSearchRec; r: Integer;
+begin
+  r := FindFirst(xdir + '*.db', FaAnyfile, DirInfo);
+  while r = 0 do  begin
+    PackParadox(xdir, pChar(DirInfo.Name));
+    r := FindNext(DirInfo);
+  end;
+end;
+
+procedure TTCIDBFM.PackTParadox(tabla: String);
+// Objetivo...: Pack a los registros de una tabla
+begin
+  if dbs.BaseClientServ = 'N' then PackParadox(dbs.baseDat + '\', tabla + '.DB');
+end;
+
+procedure TTCIDBFM.RegeneraIdx(ADatabase, ATable : String);
+begin
+ with TTable.Create(nil) do
+  try
+    DatabaseName := ADataBase;
+    TableName := ATable;
+    Exclusive := True;
+    Open;
+    Check(DbiRegenIndexes(Handle));
+    Close;
+   finally
+    Free;
+  end;
+end;
+
+procedure TTCIDBFM.RegeneraIdx;
+// Objetivo...: recorrer un directorio y chequear indices rotos
+var
+  DirInfo: TSearchRec; r: Integer;
+begin
+  if dbs.BaseClientServ = 'N' then Begin
+    r := FindFirst(dbs.baseDat + '\*.db', FaAnyfile, DirInfo);
+    while r = 0 do  begin
+      if LowerCase(Copy(pChar(DirInfo.Name), 1, 7)) <> 'usuario' then  RegeneraIdx(dbs.baseDat, pChar(DirInfo.Name));
+      r := FindNext(DirInfo);
+    end;
+  end;
+end;
+
+function TTCIDBFM.verificarSiExisteTabla(xtabla: String): Boolean;
+// Objetivo...: verificar si existe tabla, el la base de datos por defecto
+var
+  l: TStringList;
+  i: Integer;
+Begin
+  Result := False;
+  l := TStringList.Create;
+  dbs.TDB.GetTableNames(l, False);
+  For i := 1 to l.Count do Begin
+    if LowerCase(l.Strings[i-1]) = LowerCase(xtabla) then Begin
+      Result := True;
+      Break;
+    end;
+  end;
+  l.Destroy;
+end;
+
+function TTCIDBFM.verificarSiExisteTabla(xtabla: String; xdb: TDatabase): Boolean;
+// Objetivo...: verificar si existe tabla, el la base de datos por defecto
+var
+  l: TStringList;
+  i: Integer;
+Begin
+  Result := False;
+  l := TStringList.Create;
+  xdb.GetTableNames(l, False);
+  For i := 1 to l.Count do Begin
+    if LowerCase(l.Strings[i-1]) = LowerCase(xtabla) then Begin
+      Result := True;
+      Break;
+    end;
+  end;
+  l.Destroy;
+end;
+
+{===============================================================================}
+
+function datosdb: TTCIDBFM;
+begin
+  if xdatosdb = nil then
+    xdatosdb := TTCIDBFM.Create;
+  Result := xdatosdb;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xdatosdb.Free;
+
+end.

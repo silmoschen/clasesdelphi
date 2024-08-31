@@ -1,0 +1,398 @@
+unit CLotes_CCSRural;
+
+interface
+
+uses CPropitarios_CCSRural, SysUtils, CListar, DBTables, CBDT, CUtiles, CIDBFM;
+
+type
+
+TTLotes = class
+  Id, Descrip, IdNum: string;   //Manzanas
+  Lote, Idpropiet, LotesPropietario, ManzanasPropietario, LotesPropietario_IdNum, Recresiduos,
+  ManzanasPropietario_IdNum, Construido, ManzanasProp_Idnum_sc, LotesPropietario_IdNum_sc: String;
+  CantidadDeLotes: Real;
+  Porcentaje, Supexclusiva, Supcomun: Real; // Lotes
+  tabla, lotes: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+  procedure   GrabarManzana(xid, xDescrip, xidnum: string);
+  procedure   BorrarManzana(xid: string);
+  function    BuscarManzana(xid: string): boolean;
+  procedure   getDatosManzana(xid: string);
+  procedure   BuscarPorDescrip(xexpr: string);
+  procedure   BuscarPorCodigo(xexpr: string);
+
+  function    BuscarLote(xid, xitems: String): Boolean;
+  procedure   GuardarLote(xid, xitems, xlote, xidpropiet, xconstruido, xrecresiduos: String; xPorcentaje, xSupexclusiva, xSupcomun: Real; xcantitems: Integer);
+  procedure   BorrarLote(xid, xitems: String);
+  function    setLotes(xid: String): TQuery;
+  function    setLotesPorPropietario(xidpropiet: String): TQuery;
+  function    getLotesPorPropietario(xidpropiet: String): Integer;
+
+  procedure   setLotesPropietario(xidpropiet: String);
+  function    setSuperficieLotesPropietario(xidpropiet: String): Real;
+  function    setLoteConstruido(xidpropiet: String): Boolean;
+
+  function    setLotesDisponiblesParaLaVenta(xid: String): TQuery;
+  procedure   VenderLote(xidpropiet, xidmanzana, xidlote: String);
+
+  procedure   conectar;
+  procedure   desconectar;
+  procedure   ListarManzana(orden, iniciar, finalizar, ent_excl: string; listLotes: Boolean; salida: char);
+
+  function    getCantidadLotesSinRecoleccionResiduos(xidpropiet: string): integer;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  procedure   AjustarNumeroItems(xid: String; xcantitems: Integer);
+  procedure   ListLinea(listLotes: Boolean; salida: Char);
+end;
+
+function lote: TTLotes;
+
+implementation
+
+var
+  xlote: TTLotes = nil;
+
+constructor TTLotes.Create;
+begin
+  tabla := datosdb.openDB('manzanas', '');
+  lotes := datosdb.openDB('lotes', '');
+  inherited Create;
+end;
+
+destructor TTLotes.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTLotes.GrabarManzana(xid, xDescrip, xidnum: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if BuscarManzana(xid) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('id').AsString      := xid;
+  tabla.FieldByName('Descrip').AsString := xDescrip;
+  tabla.FieldByName('idnum').AsString   := xidnum;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTLotes.BorrarManzana(xid: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if BuscarManzana(xid) then Begin
+    tabla.Delete;
+    datosdb.refrescar(tabla);
+    getDatosManzana(tabla.FieldByName('id').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+  end;
+end;
+
+function TTLotes.BuscarManzana(xid: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if not tabla.Active then conectar;
+  tabla.IndexFieldNames := 'id';
+  if tabla.FindKey([xid]) then Result := True else Result := False;
+end;
+
+procedure  TTLotes.getDatosManzana(xid: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  if BuscarManzana(xid) then Begin
+    id      := tabla.FieldByName('id').AsString;
+    Descrip := tabla.FieldByName('Descrip').AsString;
+    idnum   := tabla.FieldByName('idnum').AsString;
+  end else Begin
+    id := ''; Descrip := ''; idnum := '';
+  end;
+end;
+
+procedure TTLotes.ListarManzana(orden, iniciar, finalizar, ent_excl: string; listlotes: Boolean; salida: char);
+// Objetivo...: Listar Datos de Descrips
+begin
+  if orden = 'A' then tabla.IndexFieldNames := 'Descrip';
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, '     Listado de Manzanas/Lotes', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  if not listLotes then List.Titulo(0, 0, 'Cód.' + utiles.espacios(3) +  'Descripción', 1, 'Arial, cursiva, 9') else Begin
+    List.Titulo(0, 0, '           Lote', 1, 'Arial, cursiva, 8');
+    List.Titulo(13, list.Lineactual, '  Propietario', 2, 'Arial, cursiva, 8');
+    List.Titulo(50, list.Lineactual, 'Sup. Exclusiva', 3, 'Arial, cursiva, 8');
+    List.Titulo(66, list.Lineactual, 'Sup. Común', 4, 'Arial, cursiva, 8');
+    List.Titulo(88, list.Lineactual, 'Porcentaje', 5, 'Arial, cursiva, 8');
+  end;
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(10, list.Lineactual, ' ', 1, 'Arial, negrita, 5');
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString >= iniciar) and (tabla.FieldByName('id').AsString <= finalizar) then ListLinea(listLotes, salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('id').AsString < iniciar) or (tabla.FieldByName('id').AsString > finalizar) then ListLinea(listLotes, salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('Descrip').AsString >= iniciar) and (tabla.FieldByName('Descrip').AsString <= finalizar) then ListLinea(listLotes, salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('Descrip').AsString < iniciar) or (tabla.FieldByName('Descrip').AsString > finalizar) then ListLinea(listLotes, salida);
+
+      tabla.Next;
+    end;
+
+    list.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+    list.Linea(0, 0, '          (*) Disponible para la venta.', 1, 'Arial, normal, 8', salida, 'S');
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTLotes.ListLinea(listLotes: Boolean; salida: Char);
+var
+  r: TQuery; f: String;
+begin
+  if not listLotes then List.Linea(0, 0, utiles.espacios(10) + tabla.FieldByName('id').AsString + '     ' + tabla.FieldByName('Descrip').AsString, 1, 'Arial, normal, 9', salida, 'S') else List.Linea(0, 0, utiles.espacios(10) + tabla.FieldByName('id').AsString + '     ' + tabla.FieldByName('Descrip').AsString, 1, 'Arial, negrita, 9', salida, 'S');
+  if listLotes then Begin
+    r := setLotes(tabla.FieldByName('id').AsString);
+    r.Open;
+    while not r.Eof do Begin
+      if r.FieldByName('idpropiet').AsString = '0000' then f := 'Arial, normal, 8, clNavy' else f := 'Arial, normal, 8';
+      propietario.getDatos(r.FieldByName('idpropiet').AsString);
+      List.Linea(0, 0, utiles.espacios(15) + r.FieldByName('lote').AsString, 1, f, salida, 'N');
+      List.Linea(13, list.Lineactual, propietario.nombre, 2, f, salida, 'N');
+      List.Importe(60, list.Lineactual, '', r.FieldByName('supexclusiva').AsFloat, 3, f);
+      List.Importe(75, list.Lineactual, '', r.FieldByName('supcomun').AsFloat, 4, f);
+      List.Importe(95, list.Lineactual, '', r.FieldByName('porcentaje').AsFloat, 5, f);
+      if r.FieldByName('idpropiet').AsString = '0000' then List.Linea(96, list.Lineactual, '% (*)', 6, f, salida, 'S') else List.Linea(96, list.Lineactual, '%', 6, f, salida, 'S');
+      r.Next;
+    end;
+    r.Close; r.Free;
+    List.Linea(0, 0, '       ', 1, 'Arial, normal, 5', salida, 'S');
+  end;
+end;
+
+procedure TTLotes.BuscarPorDescrip(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTLotes.BuscarPorCodigo(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'id';
+  tabla.FindNearest([xexpr]);
+end;
+
+function  TTLotes.BuscarLote(xid, xitems: String): Boolean;
+// Objetivo...: Buscar Lote
+Begin
+  Result := datosdb.Buscar(lotes, 'id', 'items', Trim(xid), Trim(xitems));
+end;
+
+procedure TTLotes.GuardarLote(xid, xitems, xlote, xidpropiet, xconstruido, xrecresiduos: String; xPorcentaje, xSupexclusiva, xSupcomun: Real; xcantitems: Integer);
+// Objetivo...: Guardar Lotes
+Begin
+  if BuscarLote(xid, xitems) then lotes.Edit else lotes.Append;
+  lotes.FieldByName('id').AsString          := xid;
+  lotes.FieldByName('items').AsString       := xitems;
+  lotes.FieldByName('idpropiet').AsString   := xidpropiet;
+  lotes.FieldByName('lote').AsString        := xlote;
+  lotes.FieldByName('porcentaje').AsFloat   := xporcentaje;
+  lotes.FieldByName('supexclusiva').AsFloat := xsupexclusiva;
+  lotes.FieldByName('supcomun').AsFloat     := xsupcomun;
+  lotes.FieldByName('construido').AsString  := xconstruido;
+  lotes.FieldByName('recresiduos').AsString := xrecresiduos;
+  try
+    lotes.Post
+   except
+    lotes.Cancel
+  end;
+  if StrToInt(xitems) = xcantitems then AjustarNumeroItems(xid, xcantitems);
+  datosdb.refrescar(lotes);
+end;
+
+procedure TTLotes.BorrarLote(xid, xitems: String);
+// Objetivo...: Borrar un Lote
+Begin
+  if BuscarLote(xid, xitems) then lotes.Delete;
+  datosdb.refrescar(lotes);
+end;
+
+function  TTLotes.setLotes(xid: String): TQuery;
+// Objetivo...: Devolver Lotes
+Begin
+  Result := datosdb.tranSQL('SELECT * FROM lotes WHERE id = ' + '"' + xid + '"');
+end;
+
+function  TTLotes.setLotesPorPropietario(xidpropiet: String): TQuery;
+// Objetivo...: Devolver Lotes de un propietario
+Begin
+  Result := datosdb.tranSQL('SELECT * FROM lotes WHERE idpropiet = ' + '"' + xidpropiet + '"');
+end;
+
+function  TTLotes.getLotesPorPropietario(xidpropiet: String): Integer;
+// Objetivo...: Devolver Lotes de un propietario
+var
+  r: TQuery;
+Begin
+  r := datosdb.tranSQL('SELECT count(*) FROM lotes WHERE idpropiet = ' + '"' + xidpropiet + '"');
+  r.open;
+  result := r.fields[0].asInteger;
+  r.close; r.free;
+end;
+
+procedure TTLotes.setLotesPropietario(xidpropiet: String);
+// Objetivo...: obtener los detalle de lotes en cuanto a lotes y manzanas
+var
+  l, m, s, n, o, p, q, z: String;
+  r: TQuery;
+Begin
+  CantidadDeLotes := 0;
+  r := setLotesPorPropietario(xidpropiet);
+  r.Open; s := '';
+  while not r.Eof do Begin
+    if r.FieldByName('porcentaje').AsFloat = 100 then CantidadDeLotes := CantidadDeLotes + 1 else CantidadDeLotes := CantidadDeLotes + 0.5;
+    getDatosManzana(r.FieldByName('id').AsString);
+    l := l + s + r.FieldByName('id').AsString + ' ' + r.FieldByName('lote').AsString;
+    n := n + s + idNum + '-' + r.FieldByName('lote').AsString;
+    z := z + ' ' + idNum + ' ' + r.FieldByName('lote').AsString;
+    m := m + s + r.FieldByName('id').AsString;
+    o := o + s + idNum;
+    p := p + s + idNum;
+    q := q + ' ' + idNum;
+    s := ', ';
+    r.Next;
+  end;
+  r.Close; r.Free;
+  LotesPropietario          := l;
+  ManzanasPropietario       := m;
+  LotesPropietario_Idnum    := n;
+  ManzanasPropietario_Idnum := o;
+  LotesPropietario_Idnum_sc := z;
+  ManzanasProp_Idnum_sc     := q;
+end;
+
+function  TTLotes.setSuperficieLotesPropietario(xidpropiet: String): Real;
+// Objetivo...: obtener los detalle de lotes en cuanto a lotes y manzanas
+var
+  r: TQuery;
+  sup: Real;
+Begin
+  r := setLotesPorPropietario(xidpropiet);
+  r.Open; sup := 0;
+  while not r.Eof do Begin
+    if r.FieldByName('porcentaje').AsFloat = 100 then sup := sup + r.FieldByName('supexclusiva').AsFloat else
+      sup := sup + (r.FieldByName('supexclusiva').AsFloat * (r.FieldByName('porcentaje').AsFloat * 0.01));
+    r.Next;
+  end;
+  r.Close; r.Free;
+  Result := sup;
+end;
+
+function TTLotes.setLoteConstruido(xidpropiet: String): Boolean;
+// Objetivo...: devolver si los lotes están construidos o no
+var
+  r: TQuery;
+Begin
+  Result := False;
+  r := setLotesPorPropietario(xidpropiet);
+  r.Open;
+  while not r.Eof do Begin
+    if r.FieldByName('construido').AsString = 'S' then Begin
+      Result := True;
+      Break;
+    end;
+    r.Next;
+  end;
+  r.Close; r.Free;
+end;
+
+function  TTLotes.setLotesDisponiblesParaLaVenta(xid: String): TQuery;
+// Objetivo...: Devolver los Lotes disponibles para la venta
+Begin
+  datosdb.refrescar(lotes);
+  Result := datosdb.tranSQL('SELECT * FROM lotes WHERE idpropiet = ' + '"' + '0000' + '"' + ' AND id = ' + '"' + xid + '"');
+end;
+
+procedure TTLotes.VenderLote(xidpropiet, xidmanzana, xidlote: String);
+// Objetivo...: Vender Lote
+Begin
+  if BuscarLote(xidmanzana, xidlote) then Begin
+    lotes.Edit;
+    lotes.FieldByName('idpropiet').AsString := xidpropiet;
+    try
+      lotes.Post
+     except
+      lotes.Cancel
+    end;
+  end;
+end;
+
+procedure TTLotes.AjustarNumeroItems(xid: String; xcantitems: Integer);
+// Objetivo...: Ajustar el nro. de items
+Begin
+  datosdb.tranSQL('DELETE FROM lotes WHERE id = ' + '"' + xid + '"' + ' AND items > ' + '"' + utiles.sLlenarIzquierda(IntToStr(xcantitems), 2, '0') + '"');
+end;
+
+function  TTLotes.getCantidadLotesSinRecoleccionResiduos(xidpropiet: string): integer;
+// Objetivo...: Devolver la Cantidad de Lotes que recolectan residuos
+var
+  r: TQuery;
+begin
+  r := datosdb.tranSQL('select count(*) from lotes where idpropiet = ' + '''' + xidpropiet + '''' + ' and recresiduos = ' + '''' + 'N' + '''');
+  r.Open;
+  result := r.fields[0].asinteger;
+  r.close; r.free;
+end;
+
+procedure TTLotes.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('id').DisplayLabel := 'Id.'; tabla.FieldByName('Descrip').DisplayLabel := 'Descripción';
+    tabla.FieldByName('idnum').DisplayLabel := 'Id.Num.';
+    if not lotes.Active then lotes.Open;
+  end;
+  Inc(conexiones);
+  propietario.conectar;
+end;
+
+procedure TTLotes.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    datosdb.closeDB(lotes);
+  end;
+  propietario.desconectar;
+end;
+
+{===============================================================================}
+
+function lote: TTLotes;
+begin
+  if xlote = nil then
+    xlote := TTLotes.Create;
+  Result := xlote;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xlote.Free;
+
+end.

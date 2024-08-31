@@ -1,0 +1,597 @@
+unit CRetencionesCentroBioq;
+
+interface
+
+uses SysUtils, DB, DBTables, CBDT, CIDBFM, CUtiles, CListar, Classes;
+
+type
+
+TTRetenciones = class(TObject)
+  Items, Descrip, RetLiq, Retiva, Honorarios, Excluir: String; Porcentaje, Tope, PorcentajeGan, MontoExedente, MontoFijo, PorcentajeTot: Real;
+  tabla, escala, cuitprof, pordif, retex: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Grabar(xitems, xDescrip, xretliq, xretiva, xhonorarios, xexcluir: String; xPorcentaje, xTope, xporcentajetot: Real);
+  procedure   Borrar(xitems: string);
+  function    Buscar(xitems: string): boolean;
+  procedure   getDatos(xitems: string);
+  function    setItems: TQuery;
+  function    setListaItems: TStringList; overload;
+  function    setListaItems(xdistribucion: string): TStringList; overload;
+  function    setListaItemsRetienenIVA: TStringList;
+  function    Nuevo: String;
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   BuscarPorDescrip(xexpr: string);
+  procedure   BuscarPorItems(xexpr: string);
+
+  procedure   GuardarRet(xitems, xsubitems: String; xdesde, xhasta, xporc, xretfija, xexedente: Real; xcantitems: Integer);
+  function    setEscala(xitems: String): TQuery;
+  procedure   getPorcentaje(xitems: String; xmonto: Real);
+
+  function    BuscarCuit(xitems, xnrocuit1, xnrocuit2: String): Boolean;
+  procedure   UnificarCuit(xitems, xnrocuit1, xnrocuit2: String);
+  procedure   BorrarCuit(xitems, xnrocuit1, xnrocuit2: String);
+  function    setCuit(xitems, xnrocuit1: String): TStringList;
+  function    setCuitProfesional(xnrocuit1: String): TStringList;
+  function    BuscarCuitDependiente(xitems, xnrocuit2: String): Boolean; overload;
+  function    BuscarCuitDependiente(xnrocuit2: String): Boolean; overload;
+
+  function    BuscarPorcentaje(xcodos, xitems: String): Boolean;
+  procedure   RegistrarPorcentaje(xcodos, xitems: String; xporcentaje: Real);
+  procedure   BorrarPorcentaje(xcodos, xitems: String);
+  function    setPorcentajes(xitems: String): TStringList;
+  function    setPorcentajeDiferencial(xcodos: String): Boolean; overload;
+  function    setPorcentajeDif(xcodos: String): Real;
+  function    setItemsDiferencial(xitems: String): Boolean;
+  function    setPorcentajeDiferencial(xcodos, xitems: String): Real; overload;
+  function    setPorcentajeValor(xcodos: String): Real;
+
+  procedure   ExcluirLaboratorio(xitems, xidprof, excluye: string);
+  function    getExcluye(xitems, xidprof: string): boolean;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  conexiones: shortint;
+  DBConexion: String;
+  lista: TStringList;
+  procedure   ListLinea(salida: char);
+  procedure   CargarPorcentajes;
+  { Declaraciones Privadas }
+end;
+
+function retenciones: TTRetenciones;
+
+implementation
+
+var
+  xcomprob: TTRetenciones = nil;
+
+constructor TTRetenciones.Create;
+begin
+  inherited Create;
+  if dbs.BaseClientServ = 'S' then DBConexion := dbs.baseDat else DBConexion := dbs.DirSistema + '\archdat';
+  tabla    := datosdb.openDB('retenciones', '', '', DBConexion);
+  escala   := datosdb.openDB('escalaretenciones', '', '', DBConexion);
+  cuitprof := datosdb.openDB('cuitprof', '', '', DBConexion);
+  pordif   := datosdb.openDB('pordifobsoc', '', '', DBConexion);
+  retex    := datosdb.openDB('retenciones_excluir', '', '', DBConexion);
+  lista    := TStringList.Create;
+end;
+
+destructor TTRetenciones.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTRetenciones.Grabar(xItems, xDescrip, xretliq, xretiva, xhonorarios, xexcluir: String; xPorcentaje, xTope, xporcentajetot: Real);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xItems) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('Items').AsString        := xItems;
+  tabla.FieldByName('Descrip').AsString      := xDescrip;
+  tabla.FieldByName('retliq').AsString       := xretliq;
+  tabla.FieldByName('Porcentaje').AsFloat    := xPorcentaje;
+  tabla.FieldByName('Tope').AsFloat          := xTope;
+  tabla.FieldByName('retiva').AsString       := xretiva;
+  tabla.FieldByName('excluir').AsString      := xexcluir;
+  tabla.FieldByName('honorarios').AsString   := xhonorarios;
+  tabla.FieldByName('porcentajetot').AsFloat := xporcentajetot;
+  try
+    tabla.Post
+  except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTRetenciones.Borrar(xItems: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xItems) then Begin
+    tabla.Delete;
+    getDatos(tabla.FieldByName('Items').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+    datosdb.refrescar(tabla);
+  end;
+end;
+
+function TTRetenciones.Buscar(xItems: string): Boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if tabla.IndexFieldNames <> 'Items' then tabla.IndexFieldNames := 'Items';
+  if tabla.FindKey([xitems]) then Result := True else Result := False;
+end;
+
+procedure  TTRetenciones.getDatos(xitems: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  tabla.Refresh;
+  if Buscar(xitems) then Begin
+    items         := tabla.FieldByName('items').AsString;
+    descrip       := tabla.FieldByName('descrip').AsString;
+    retliq        := tabla.FieldByName('retliq').AsString;
+    retiva        := tabla.FieldByName('retiva').AsString;
+    Porcentaje    := tabla.FieldByName('Porcentaje').AsFloat;
+    Tope          := tabla.FieldByName('Tope').AsFloat;
+    honorarios    := tabla.FieldByName('honorarios').AsString;
+    PorcentajeTot := tabla.FieldByName('porcentajetot').AsFloat;
+    excluir       := tabla.FieldByName('excluir').AsString;
+    if (PorcentajeTot = 0) then PorcentajeTot := 100;
+  end else Begin
+    items := ''; descrip := ''; retliq := ''; Porcentaje := 0; Tope := 0; retiva := ''; Honorarios := 'N'; PorcentajeTot := 0; excluir := '';
+  end;
+  if retiva = '' then retiva := 'N';
+  if honorarios = '' then honorarios := 'N';
+end;
+
+function TTRetenciones.setItems: TQuery;
+// Objetivo...: devolver un set con los items disponibles
+begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM ' + tabla.TableName + ' ORDER BY Descrip');
+end;
+
+function TTRetenciones.setListaItems: TStringList;
+// Objetivo...: devolver un set con los items disponibles
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  tabla.IndexFieldNames := 'descrip';
+  if not tabla.Active then tabla.Open;
+  tabla.First;
+  while not tabla.Eof do Begin
+    l.Add(tabla.FieldByName('items').AsString + tabla.FieldByName('descrip').AsString + ';1' + tabla.FieldByName('porcentaje').AsString + ';2' + tabla.FieldByName('tope').AsString + ';3' + tabla.FieldByName('retliq').AsString);
+    tabla.Next;
+  end;
+  tabla.IndexFieldNames := 'items';
+  Result := l;
+end;
+
+function TTRetenciones.setListaItems(xdistribucion: string): TStringList;
+// Objetivo...: devolver un set con los items disponibles
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  tabla.IndexFieldNames := 'descrip';
+  if not tabla.Active then tabla.Open;
+  tabla.First;
+  while not tabla.Eof do Begin
+    if (tabla.FieldByName('excluir').AsString <> xdistribucion) then l.Add(tabla.FieldByName('items').AsString + tabla.FieldByName('descrip').AsString + ';1' + tabla.FieldByName('porcentaje').AsString + ';2' + tabla.FieldByName('tope').AsString + ';3' + tabla.FieldByName('retliq').AsString);
+    tabla.Next;
+  end;
+  tabla.IndexFieldNames := 'items';
+  Result := l;
+end;
+
+
+function TTRetenciones.setListaItemsRetienenIVA: TStringList;
+// Objetivo...: devolver un set con los items disponibles que retienen iva
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  tabla.IndexFieldNames := 'descrip';
+  if not tabla.Active then tabla.Open;
+  tabla.First;
+  while not tabla.Eof do Begin
+    if tabla.FieldByName('retiva').AsString = 'S' then
+      l.Add(tabla.FieldByName('items').AsString + tabla.FieldByName('descrip').AsString + ';1' + tabla.FieldByName('porcentaje').AsString + ';2' + tabla.FieldByName('tope').AsString + ';3' + tabla.FieldByName('retliq').AsString);
+    tabla.Next;
+  end;
+  tabla.IndexFieldNames := 'items';
+  Result := l;
+end;
+
+function TTRetenciones.Nuevo: string;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  tabla.Last;
+  if tabla.RecordCount = 0 then Result := '1' else Result := IntToStr(StrToInt(tabla.FieldByName('items').AsString) + 1);
+end;
+
+procedure TTRetenciones.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar colección de objetos
+begin
+  if orden = 'A' then tabla.IndexName := tabla.IndexDefs.Items[1].Name;
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Tabla de Retenciones', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Items    Descripción', 1, 'Arial, cursiva, 8');
+  List.Titulo(73, 0, 'Porc. Ret.', 2, 'Arial, cursiva, 8');
+  List.Titulo(82, 0, 'Monto No Imponible', 3, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('items').AsString >= iniciar) and (tabla.FieldByName('items').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('items').AsString < iniciar) or (tabla.FieldByName('items').AsString > finalizar) then ListLinea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then ListLinea(salida);
+
+      tabla.Next;
+    end;
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTRetenciones.ListLinea(salida: char);
+begin
+  List.Linea(0, 0, tabla.FieldByName('items').AsString + '         ' + tabla.FieldByName('descrip').AsString, 1, 'Arial, normal, 8', salida, 'N');
+  List.Importe(80, List.lineactual, '', tabla.FieldByName('Porcentaje').AsFloat, 2, 'Arial, normal, 8');
+  List.Importe(96, List.lineactual, '', tabla.FieldByName('Tope').AsFloat, 3, 'Arial, normal, 8');
+  List.Linea(97, list.lineactual, ' ', 4, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTRetenciones.BuscarPorDescrip(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTRetenciones.BuscarPorItems(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'items';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTRetenciones.GuardarRet(xitems, xsubitems: String; xdesde, xhasta, xporc, xretfija, xexedente: Real; xcantitems: Integer);
+// Objetivo...: Registrar Items
+Begin
+  if datosdb.Buscar(escala, 'items', 'subitems', xitems, xsubitems) then  escala.Edit else escala.Append;
+  escala.FieldByName('items').AsString    := xitems;
+  escala.FieldByName('subitems').AsString := xsubitems;
+  escala.FieldByName('desde').AsFloat     := xdesde;
+  escala.FieldByName('hasta').AsFloat     := xhasta;
+  escala.FieldByName('porc').AsFloat      := xporc;
+  escala.FieldByName('retfija').AsFloat   := xretfija;
+  escala.FieldByName('exedente').AsFloat  := xexedente;
+  try
+    escala.Post
+   except
+    escala.Cancel
+  end;
+  if xsubitems = utiles.sLlenarIzquierda(IntToStr(xcantitems), 2, '0') then datosdb.tranSQL(DBConexion, 'delete from escalaretenciones where items = ' + '"' + xitems + '"' + ' and subitems > ' + '"' + utiles.sLlenarIzquierda(IntToStr(xcantitems), 2, '0') + '"');
+end;
+
+function  TTRetenciones.setEscala(xitems: String): TQuery;
+// Objetivo...: Devolver escala
+Begin
+  Result := datosdb.tranSQL(DBConexion, 'select * from escalaretenciones where items = ' + '"' + xitems + '"' + ' order by items, subitems');
+end;
+
+procedure  TTRetenciones.getPorcentaje(xitems: String; xmonto: Real);
+// Obketivo...: retornar porcentaje
+Begin
+  getDatos(xitems);
+  PorcentajeGan := 0; MontoExedente := 0; MontoFijo := 0;
+  if not escala.Active then escala.Open;
+  escala.First;
+  while not escala.Eof do Begin
+    PorcentajeGan := escala.FieldByName('porc').AsFloat;
+    MontoFijo     := escala.FieldByName('retfija').AsFloat;
+    MontoExedente := escala.FieldByName('exedente').AsFloat;
+    if escala.FieldByName('hasta').AsFloat >= xmonto then Break;
+    escala.Next;
+  end;
+end;
+
+function TTRetenciones.BuscarCuit(xitems, xnrocuit1, xnrocuit2: String): Boolean;
+// Objetivo...: Buscar CUIT
+begin
+  if cuitprof.IndexFieldNames <> 'Items;cuit1;cuit2' then cuitprof.IndexFieldNames := 'Items;Cuit1;Cuit2';
+  Result := datosdb.Buscar(cuitprof, 'Items', 'Cuit1', 'Cuit2', xitems, xnrocuit1, xnrocuit2);
+end;
+
+procedure TTRetenciones.UnificarCuit(xitems, xnrocuit1, xnrocuit2: String);
+// Objetivo...: Unificar CUIT
+begin
+  if BuscarCuit(xitems, xnrocuit1, xnrocuit2) then cuitprof.Edit else cuitprof.Append;
+  cuitprof.FieldByName('items').AsString := xitems;
+  cuitprof.FieldByName('cuit1').AsString := xnrocuit1;
+  cuitprof.FieldByName('cuit2').AsString := xnrocuit2;
+  try
+    cuitprof.Post
+   except
+    cuitprof.Cancel
+  end;
+  datosdb.refrescar(cuitprof);
+end;
+
+procedure TTRetenciones.BorrarCuit(xitems, xnrocuit1, xnrocuit2: String);
+// Objetivo...: Borrar CUIT
+begin
+  if BuscarCuit(xitems, xnrocuit1, xnrocuit2) then cuitprof.Delete;
+  datosdb.refrescar(cuitprof);
+end;
+
+function TTRetenciones.setCuit(xitems, xnrocuit1: String): TStringList;
+// Objetivo...: Devolver los Cuit asociados
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  if cuitprof.IndexFieldNames <> 'Items;cuit1' then cuitprof.IndexFieldNames := 'Items;Cuit1';
+  if datosdb.Buscar(cuitprof, 'Items', 'Cuit1', xitems, xnrocuit1) then Begin
+    while not cuitprof.Eof do Begin
+      if cuitprof.FieldByName('cuit1').AsString <> xnrocuit1 then Break;
+      l.Add(cuitprof.FieldByName('cuit1').AsString + ';1' + cuitprof.FieldByName('cuit2').AsString);
+      cuitprof.Next;
+    end;
+  end;
+  Result := l;
+end;
+
+function TTRetenciones.setCuitProfesional(xnrocuit1: String): TStringList;
+// Objetivo...: Devolver los Cuit asociados
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  if not cuitprof.Active then cuitprof.Open;
+  if cuitprof.IndexFieldNames <> 'Items;cuit1' then cuitprof.IndexFieldNames := 'Items;Cuit1';
+  datosdb.Filtrar(cuitprof, 'Cuit1 = ' + '''' + xnrocuit1 + '''');
+  cuitprof.First;
+  while not cuitprof.Eof do Begin
+    l.Add(cuitprof.FieldByName('cuit1').AsString + ';1' + cuitprof.FieldByName('cuit2').AsString);
+    cuitprof.Next;
+  end;
+  datosdb.QuitarFiltro(cuitprof);
+  Result := l;
+end;
+
+function TTRetenciones.BuscarCuitDependiente(xitems, xnrocuit2: String): Boolean;
+// Objetivo...: Buscar CUIT Secundario
+begin
+  if cuitprof.IndexFieldNames <> 'Items;cuit2' then cuitprof.IndexFieldNames := 'Items;Cuit2';
+  Result := datosdb.Buscar(cuitprof, 'Items', 'Cuit2', xitems, xnrocuit2);
+end;
+
+function TTRetenciones.BuscarCuitDependiente(xnrocuit2: String): Boolean;
+// Objetivo...: Buscar CUIT Secundario
+begin
+  if not cuitprof.Active then cuitprof.Open;
+  Result := False;
+  cuitprof.First;
+  while not cuitprof.Eof do Begin
+    if cuitprof.FieldByName('cuit2').AsString = xnrocuit2 then Begin
+      Result := True;
+      Break;
+    end;
+    cuitprof.Next;
+  end;
+end;
+
+function  TTRetenciones.BuscarPorcentaje(xcodos, xitems: String): Boolean;
+// Objetivo...: Registrar una instancia
+begin
+  Result := datosdb.Buscar(pordif, 'codos', 'items', xcodos, xitems);
+end;
+
+procedure TTRetenciones.RegistrarPorcentaje(xcodos, xitems: String; xporcentaje: Real);
+// Objetivo...: Registrar una instancia
+begin
+  if BuscarPorcentaje(xcodos, xitems) then pordif.Edit else pordif.Append;
+  pordif.FieldByName('codos').AsString     := xcodos;
+  pordif.FieldByName('items').AsString     := xitems;
+  pordif.FieldByName('porcentaje').AsFloat := xporcentaje;
+  try
+    pordif.Post
+   except
+    pordif.Cancel
+  end;
+  datosdb.closeDB(pordif); pordif.Open;
+  CargarPorcentajes;
+end;
+
+procedure TTRetenciones.BorrarPorcentaje(xcodos, xitems: String);
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if BuscarPorcentaje(xcodos, xitems) then pordif.Delete;
+  datosdb.closeDB(pordif); pordif.Open;
+  CargarPorcentajes;
+end;
+
+function  TTRetenciones.setPorcentajes(xitems: String): TStringList;
+// Objetivo...: Abrir tablas de persistencia
+var
+  lista: TStringList;
+begin
+  lista := TStringList.Create;
+  datosdb.Filtrar(pordif, 'items = ' + '''' + xitems + '''');
+  pordif.First;
+  while not pordif.Eof do Begin
+    lista.Add(pordif.FieldByName('codos').AsString + pordif.FieldByName('porcentaje').AsString);
+    pordif.Next;
+  end;
+  datosdb.QuitarFiltro(pordif);
+  Result := lista;
+end;
+
+function TTRetenciones.setPorcentajeDiferencial(xcodos: String): Boolean;
+// Objetivo...: Verificar si la Obra Social tiene porcentaje
+var
+  i: Integer;
+Begin
+  Result := False;
+  For i := 1 to lista.Count do
+    if (Copy(lista.Strings[i-1], 1, 6) = xcodos) then Begin
+      Result := True;
+      Break;
+    end;
+end;
+
+function TTRetenciones.setPorcentajeDif(xcodos: String): Real;
+// Objetivo...: Verificar si la Obra Social tiene porcentaje
+var
+  i: Integer;
+Begin
+  Result := 0;
+  For i := 1 to lista.Count do
+    if (Copy(lista.Strings[i-1], 1, 6) = xcodos) then Begin
+      Result := StrToFloat(Trim(Copy(lista.Strings[i-1], 9, 10)));
+      Break;
+    end;
+end;
+
+function TTRetenciones.setPorcentajeValor(xcodos: String): Real;
+// Objetivo...: Verificar si la Obra Social tiene porcentaje
+var
+  i: Integer;
+Begin
+  Result := 0;
+  For i := 1 to lista.Count do
+    if Copy(lista.Strings[i-1], 1, 6) = xcodos then Begin
+      Result := StrToFloat(Trim(Copy(lista.Strings[i-1], 9, 15)));
+      Break;
+    end;
+end;
+
+
+function TTRetenciones.setItemsDiferencial(xitems: String): Boolean;
+// Objetivo...: Verificar si el items es de porcentaje diferencial
+var
+  i: Integer;
+Begin
+  Result := False;
+  For i := 1 to lista.Count do
+    if Copy(lista.Strings[i-1], 7, 2) = xitems then Begin
+      Result := True;
+      Break;
+    end;
+end;
+
+function TTRetenciones.setPorcentajeDiferencial(xcodos, xitems: String): Real;
+// Objetivo...: Recuperar Porcentaje
+var
+  i: Integer;
+Begin
+  Result := 0;
+  For i := 1 to lista.Count do
+    if (Copy(lista.Strings[i-1], 1, 6) = xcodos) and (Copy(lista.Strings[i-1], 7, 2) = xitems) then Begin
+      Result := StrToFloat(Trim(Copy(lista.Strings[i-1], 9, 10)));
+      Break;
+    end;
+end;
+
+procedure TTRetenciones.CargarPorcentajes;
+// Objetivo...: Cargar Porcentaje
+begin
+  lista.Clear;
+  pordif.First;
+  while not pordif.Eof do Begin
+    lista.Add(pordif.FieldByName('codos').AsString + pordif.FieldByName('items').AsString + pordif.FieldByName('porcentaje').AsString);
+    pordif.Next;
+  end;
+end;
+
+procedure TTRetenciones.ExcluirLaboratorio(xitems, xidprof, excluye: string);
+begin
+  if (excluye = '') then begin
+    if (datosdb.Buscar(retex, 'items', 'idprof', xitems, xidprof)) then begin
+      retex.Delete;
+      retex.Refresh;
+      exit;
+    end;
+  end;
+  if (excluye = 'S') then begin
+      if not (datosdb.Buscar(retex, 'items', 'idprof', xitems, xidprof)) then retex.Append else retex.Edit;
+      retex.fieldbyname('items').asstring  := xitems;
+      retex.fieldbyname('idprof').asstring := xidprof;
+      retex.post;
+      retex.refresh;
+  end;
+end;
+
+function TTRetenciones.getExcluye(xitems, xidprof: string): boolean;
+begin
+  result := datosdb.Buscar(retex, 'items', 'idprof', xitems, xidprof);
+end;
+
+procedure TTRetenciones.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    if not datosdb.verificarSiExisteCampo(tabla, 'retiva') then Begin
+      tabla.Close;
+      if dbs.BaseClientServ = 'S' then datosdb.tranSQL(tabla.DatabaseName, 'alter table retenciones add retiva varchar(1)');
+      if dbs.BaseClientServ = 'N' then datosdb.tranSQL(tabla.DatabaseName, 'alter table retenciones add retiva char(1)');
+      tabla.Open;
+    end;
+    tabla.FieldByName('items').DisplayLabel := 'Items'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('Porcentaje').DisplayLabel := 'Porcentaje';
+    tabla.FieldByName('Tope').DisplayLabel := 'M. No Imponible'; tabla.FieldByName('Retiva').DisplayLabel := 'Ret. I.V.A.';
+    tabla.FieldByName('retliq').DisplayLabel := 'R.Liq.'; tabla.FieldByName('honorarios').DisplayLabel := 'Ret.Hon.'; tabla.FieldByName('porcentajetot').DisplayLabel := '% s/ Total';
+    if not escala.Active then escala.Open;
+    if not cuitprof.Active then cuitprof.Open;
+    if not pordif.Active then pordif.Open;
+    if not retex.Active then retex.Open;
+    CargarPorcentajes;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTRetenciones.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    datosdb.closeDB(escala);
+    datosdb.closeDB(cuitprof);
+    datosdb.closeDB(pordif);
+    datosdb.closeDB(retex);
+  end;
+end;
+
+{===============================================================================}
+
+function retenciones: TTRetenciones;
+begin
+  if xcomprob = nil then
+    xcomprob := TTRetenciones.Create;
+  Result := xcomprob;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xcomprob.Free;
+
+end.

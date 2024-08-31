@@ -1,0 +1,196 @@
+unit CBancosCentroBioq;
+
+interface
+
+uses SysUtils, CListar, DB, DBTables, CUtiles, CIDBFM, CBDT;
+
+type
+
+TTBanco = class(TObject)            // Superclase
+  codbanco, descrip: string;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create(xcodbanco, xdescrip: string);
+  destructor  Destroy; override;
+
+  procedure   Grabar(xCodbanco, xDescrip: string);
+  procedure   Borrar(xCodbanco: string);
+  function    Buscar(xCodbanco: string): boolean;
+  function    Nuevo: string;
+  procedure   getDatos(xCodbanco: string);
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   BuscarPorCodigo(xcodigo: string);
+  procedure   BuscarPorNombre(xdescrip: string);
+  function    setBancos: TQuery;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  conexiones: shortint;
+  { Declaraciones Privadas }
+end;
+
+function entbcos: TTBanco;
+
+implementation
+
+var
+  xbanco: TTBanco = nil;
+
+constructor TTBanco.Create(xcodbanco, xdescrip: string);
+begin
+  inherited Create;
+  codbanco := xcodbanco;
+  descrip  := xdescrip;
+  tabla    := datosdb.openDB('entbcos', '', '', dbs.dirSistema + '\archdat');
+end;
+
+destructor TTBanco.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTBanco.Grabar(xcodbanco, xdescrip: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xcodbanco) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('codbanco').Value := xcodbanco;
+  tabla.FieldByName('descrip').Value  := xdescrip;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+end;
+
+procedure TTBanco.Borrar(xcodbanco: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xcodbanco) then
+    begin
+      tabla.Delete;
+      getDatos(tabla.FieldByName('codbanco').Value);  // Fijamos los Atributos Siguientes al Objeto Borrado
+    end;
+end;
+
+function TTBanco.Buscar(xcodbanco: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if tabla.IndexFieldNames <> 'Codbanco' then tabla.IndexFieldNames := 'Codbanco';
+  if tabla.FindKey([xcodbanco]) then Result := True else Result := False;
+end;
+
+procedure  TTBanco.getDatos(xcodbanco: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  tabla.Refresh;
+  if Buscar(xcodbanco) then
+    begin
+      codbanco := tabla.FieldByName('codbanco').Value;
+      descrip  := tabla.FieldByName('descrip').Value;
+    end
+   else
+    begin
+      codbanco := ''; descrip := '';
+    end;
+end;
+
+function TTBanco.Nuevo: string;
+// Objetivo...: Generar un Nuevo Atributo Código
+var
+  indice: String;
+begin
+  indice := tabla.IndexFieldNames;
+  tabla.IndexFieldNames := 'codbanco';
+  tabla.Refresh; tabla.Last;
+  Result := IntToStr(tabla.FieldByName('codbanco').AsInteger + 1);
+  tabla.IndexFieldNames := indice;
+end;
+
+function TTBanco.setBancos: TQuery;
+// Objetivo...: devolver un set con los bancos existentes
+begin
+  Result := datosdb.tranSQL('SELECT codbanco, descrip FROM entbcos ORDER BY descrip');
+end;
+
+procedure TTBanco.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar Datos de Provincias
+begin
+  if orden = 'A' then tabla.IndexFieldNames := 'Descrip';
+
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado de Bancos', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.' + utiles.espacios(3) +  'Banco', 1, 'Courier New, cursiva, 9');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('codbanco').AsString >= iniciar) and (tabla.FieldByName('codbanco').AsString <= finalizar) then List.Linea(0, 0, tabla.FieldByName('codbanco').AsString + '     ' + tabla.FieldByName('descrip').AsString, 1, 'Courier New, normal, 9', salida, 'S');
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('codbanco').AsString < iniciar) or (tabla.FieldByName('codbanco').AsString > finalizar) then List.Linea(0, 0, tabla.FieldByName('codbanco').AsString + '     ' + tabla.FieldByName('descrip').AsString, 1, 'Courier New, normal, 9', salida, 'S');
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then List.Linea(0, 0, tabla.FieldByName('codbanco').AsString + '     ' + tabla.FieldByName('descrip').AsString, 1, 'Courier New, normal, 9', salida, 'S');
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then List.Linea(0, 0, tabla.FieldByName('codbanco').AsString + '     ' + tabla.FieldByName('descrip').AsString, 1, 'Courier New, normal, 9', salida, 'S');
+
+      tabla.Next;
+    end;
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTBanco.BuscarPorCodigo(xcodigo: string);
+begin
+  if tabla.IndexFieldNames <> 'Codbanco' then tabla.IndexFieldNames := 'Codbanco';
+  tabla.FindNearest([xcodigo]);
+end;
+
+procedure TTBanco.BuscarPorNombre(xdescrip: string);
+begin
+  if tabla.IndexName <> 'Descrip' then tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xdescrip]);
+end;
+
+procedure TTBanco.conectar;
+// Objetivo...: conectar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('codbanco').DisplayLabel := 'Cód.'; tabla.FieldByName('Descrip').DisplayLabel := 'Banco';
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTBanco.desconectar;
+// Objetivo...: desconectar tablas de persistencia
+begin
+  if conexiones < 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tabla);
+end;
+
+{===============================================================================}
+
+function entbcos: TTBanco;
+begin
+  if xbanco = nil then
+    xbanco := TTBanco.Create('', '');
+  Result := xbanco;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xbanco.Free;
+
+end.

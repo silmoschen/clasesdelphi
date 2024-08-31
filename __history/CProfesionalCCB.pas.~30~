@@ -1,0 +1,577 @@
+unit CProfesionalCCB;
+
+interface
+
+uses CPersona, CCategoriasCCB, CBDT, SysUtils, DB, DBTables, CUtiles, CListar, CIDBFM, Classes,
+     Forms, Contnrs;
+
+type
+
+TTProfesional = class(TTPersona)
+  Telefono, Nrocuit, Email, Idcategoria, Matricula, Fechamat, AjusteDC, Codfact, Nivel2, Retieneiva, Periodo, Idcini, PeriodoIva, Factglobal: string;
+  porcUB, porcUG: real;
+  tabla2, categorias, posiva: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xcodigo: string): boolean;
+  procedure   Grabar(xcodigo, xapellido, xdomicilio, xcp, xorden, xtelefono, xnrocuit, xemail, xidcategoria, xmatricula, xfechamat, xajustedc, xcodfact: string); overload;
+  procedure   Grabar(xcodigo, xapellido, xdomicilio, xcp, xorden, xtelefono, xnrocuit, xemail, xidcategoria, xmatricula, xfechamat, xajustedc, xcodfact, xnivel, xretieneiva, xfactglobal: string); overload;
+  procedure   Borrar(xcodigo: string);
+  procedure   getDatos(xcodigo: string);
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   BuscarApellido(xapellido: string);
+  procedure   BuscarPorCodigo(xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+
+  procedure   RegistrarCategorizacion(xidprof, xperiodo, xcategoria: String);
+  procedure   ObtenerUltimaCategorizacion(xidprof: String);
+  procedure   SincronizarCategoria(xidprof, xperiodo: String);
+  function    setCambiosDeCategoria(xidprof: String): TStringList;
+  procedure   BorrarCategorizacion(xidprof, xperiodo: String);
+
+  function    setProfesionalesAlf: TQuery;
+  function    setProfesionalesAlfRetIVA: TQuery;
+  function    setPorcentajeCategoria(xidprof: String): real;
+
+  function    BuscarProfesionalCUIT(xnrocuit: String): Boolean;
+
+  function    BuscarPosiva(xidprof, xperiodo: String): Boolean;
+  procedure   RegistrarPosiva(xidprof, xperiodo, xretieneiva, xajustedc: String);
+  procedure   BorrarPosiva(xidprof, xperiodo: String);
+  procedure   getDatosPosiva(xidprof, xperiodo: String);
+  function    setListaPosiva(xidprof: String): TObjectList;
+  procedure   SincronizarListaRetIVA(xperiodo, xidprof: String);
+
+  procedure   FiltrarLaboratoriosFacturacionGlobal;
+  procedure   FiltrarLaboratoriosNormales;
+  procedure   QuitarFiltro;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  DBConexion: String;
+  conexiones: shortint;
+  lista: TStringList;
+  lista1: TObjectList;
+  procedure   List_linea(salida: char);
+  procedure   List_Tit(salida: char);
+  procedure   CargarLista;
+  procedure   CargarListaRet;
+end;
+
+function profesional: TTProfesional;
+
+implementation
+
+var
+  xprofesional: TTProfesional = nil;
+
+constructor TTProfesional.Create;
+begin
+  inherited Create('', '', '', '', ''); // Hereda de Persona
+  if (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccb.exe') or                  // Motor de Persitencia para las versiones de Laboratorios Cliente-Servidor
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbc.exe') or
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbcretivac.exe') or
+     (LowerCase(ExtractFileName(Application.ExeName)) = 'shmsoftfccbcretiva.exe') then Begin   // Motor de Persitencia para las versiones de Laboratorios
+    if dbs.BaseClientServ = 'N' then DBConexion := dbs.DirSistema + '\archdat' else DBConexion := dbs.TDB1.DatabaseName;
+  end else Begin
+    if dbs.BaseClientServ = 'N' then DBConexion := dbs.DirSistema + '\archdat' else DBConexion := dbs.baseDat;
+  end;
+
+  tperso     := datosdb.openDB('profesio', 'Idprof', '', DBConexion);
+  tabla2     := datosdb.openDB('profesih', 'Idprof', '', DBConexion);
+  categorias := datosdb.openDB('categorias_profesionales', '', '', DBConexion);
+  posiva     := datosdb.openDB('posiva_prof', '', '', DBConexion);  // cuidado !!!
+  lista      := TStringList.Create;
+  lista1     := TObjectList.Create;
+end;
+
+destructor TTProfesional.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTProfesional.Buscar(xcodigo: string): boolean;
+// Objetivo...: Buscar una instancia
+begin
+  if not tperso.Active then tperso.Open;
+  if not tabla2.Active then tabla2.Open;
+  if tperso.IndexFieldNames <> 'Idprof' then tperso.IndexFieldNames := 'Idprof';
+  if tabla2.IndexFieldNames <> 'Idprof' then tabla2.IndexFieldNames := 'Idprof';
+  if tabla2.FindKey([xcodigo]) then Begin
+    inherited Buscar(xcodigo);
+    Result := True;
+  end else
+    Result := False;
+end;
+
+procedure TTProfesional.Grabar(xcodigo, xapellido, xdomicilio, xcp, xorden, xtelefono, xnrocuit, xemail, xidcategoria, xmatricula, xfechamat, xajustedc, xcodfact: string);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  if (dbs.Trial) and (tperso.RecordCount >= 4) then utiles.msgError('Version de Prueba,' + chr(13) + 'No se admiten mas de 4 Laboratorios ...!') else Begin
+    if Buscar(xcodigo) then tabla2.Edit else tabla2.Append;
+    tabla2.FieldByName('idprof').AsString      := xcodigo;
+    tabla2.FieldByName('telefono').AsString    := xtelefono;
+    tabla2.FieldByName('nrocuit').AsString     := xnrocuit;
+    tabla2.FieldByName('email').AsString       := xemail;
+    tabla2.FieldByName('idcategoria').AsString := xidcategoria;
+    tabla2.FieldByName('matricula').AsString   := xmatricula;
+    tabla2.FieldByName('fechamat').AsString    := xfechamat;
+    tabla2.FieldByName('ajustedc').AsString    := xajustedc;
+    tabla2.FieldByName('codfact').AsString     := xcodfact;
+    try
+      tabla2.Post
+    except
+      tabla2.Cancel
+    end;
+    inherited Grabar(xcodigo, xapellido, xdomicilio, '', '');
+  end;
+end;
+
+procedure TTProfesional.Grabar(xcodigo, xapellido, xdomicilio, xcp, xorden, xtelefono, xnrocuit, xemail, xidcategoria, xmatricula, xfechamat, xajustedc, xcodfact, xnivel, xretieneiva, xfactglobal: string);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  if (dbs.Trial) and (tperso.RecordCount >= 4) then utiles.msgError('Version de Prueba,' + chr(13) + 'No se admiten mas de 4 Laboratorios ...!') else Begin
+    Grabar(xcodigo, xapellido, xdomicilio, xcp, xorden, xtelefono, xnrocuit, xemail, xidcategoria, xmatricula, xfechamat, xajustedc, xcodfact);
+    tabla2.Edit;
+    tabla2.FieldByName('nivel2').AsString     := xnivel;
+    tabla2.FieldByName('retieneiva').AsString := xretieneiva;
+    try
+      tabla2.Post
+    except
+      tabla2.Cancel
+    end;
+    Buscar(xcodigo);
+    tperso.Edit;
+    tperso.FieldByName('factglobal').AsString := xfactglobal;
+    try
+      tperso.Post
+    except
+      tperso.Cancel
+    end;
+  end;
+end;
+
+procedure TTProfesional.Borrar(xcodigo: string);
+// Objetivo...: Eliminar una instancia
+begin
+  if Buscar(xcodigo) then Begin
+    tabla2.Delete;
+    inherited Borrar(xcodigo);
+    getDatos(tabla2.FieldByName('idprof').AsString);
+  end;
+end;
+
+procedure TTProfesional.getDatos(xcodigo: string);
+// Objetivo...: Cargar/iniciar los atributos para una instancia
+begin
+  if Buscar(xcodigo) then Begin
+    codigo      := tperso.FieldByName('idprof').AsString;
+    nombre      := tperso.FieldByName('nombre').AsString;
+    domicilio   := tperso.FieldByName('direccion').AsString;
+    codpost     := tperso.FieldByName('cp').AsString;
+    orden       := tperso.FieldByName('orden').AsString;
+    factglobal  := tperso.FieldByName('factglobal').AsString;
+    telefono    := tabla2.FieldByName('telefono').AsString;
+    nrocuit     := tabla2.FieldByName('nrocuit').AsString;
+    email       := tabla2.FieldByName('email').AsString;
+    idcategoria := tabla2.FieldByName('idcategoria').AsString;
+    matricula   := tabla2.FieldByName('matricula').AsString;
+    if Pos('/', tabla2.FieldByName('fechamat').AsString) > 0 then fechamat := tabla2.FieldByName('fechamat').AsString else
+      fechamat := utiles.sFormatoFecha(tabla2.FieldByName('fechamat').AsString);
+    ajustedc    := tabla2.FieldByName('ajustedc').AsString;
+    categoria.getDatos(idcategoria);
+    porcUB      := categoria.porcUB;
+    porcUG      := categoria.porcUG;
+    codfact     := tabla2.FieldByName('codfact').AsString;
+    if datosdb.verificarSiExisteCampo(tabla2, 'nivel2') then Nivel2 := tabla2.FieldByName('nivel2').AsString;
+    if datosdb.verificarSiExisteCampo(tabla2, 'retieneiva') then retieneiva := tabla2.FieldByName('retieneiva').AsString;
+    if Length(Trim(nrocuit)) < 13 then nrocuit := '00-00000000-0';
+  end else Begin
+    codigo := ''; nombre := ''; domicilio := ''; codpost := ''; orden := ''; telefono := ''; nrocuit := ''; email := ''; idcategoria := ''; porcUB := 0; porcUG := 0; matricula := ''; fechamat := ''; ajustedc := ''; codfact := ''; Nivel2 := ''; retieneiva := 'N';
+    factglobal := '';
+  end;
+  if Length(Trim(retieneiva)) = 0 then retieneiva := 'N';
+  //inherited getDatos(xcodigo);
+end;
+
+procedure TTProfesional.BuscarApellido(xapellido: string);
+// Objetivo...: Busqueda contextual por apellido
+begin
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.FindNearest([xapellido]);
+  tperso.IndexFieldNames := 'idprof';
+end;
+
+procedure TTProfesional.List_Tit(salida: char);
+// Objetivo...: Listar una Línea
+begin
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado de Profesionales', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.  Apellido y Nombre', 1, 'Arial, cursiva, 8');
+  List.Titulo(35, List.lineactual, 'Dirección', 2, 'Arial, cursiva, 8');
+  List.Titulo(60, List.lineactual, 'Teléfono', 3, 'Arial, cursiva, 8');
+  List.Titulo(75, List.lineactual, 'E-mail', 4, 'Arial, cursiva, 8');
+  List.Titulo(94, List.lineactual, 'DC Ind.', 5, 'Arial, cursiva, 8');
+
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+end;
+
+procedure TTProfesional.List_linea(salida: char);
+// Objetivo...: Listar una Línea
+begin
+  if tabla2.IndexFieldNames <> 'Idprof' then tabla2.IndexFieldNames := 'Idprof';
+  tabla2.FindKey([tperso.FieldByName('idprof').AsString]);   // Sincronizamos las tablas
+  List.Linea(0, 0, tperso.FieldByName('idprof').AsString + '  ' + tperso.FieldByName('nombre').AsString, 1, 'Arial, normal, 8', salida, 'N');
+  List.Linea(35, List.lineactual, tperso.FieldByName('direccion').AsString, 2, 'Arial, normal, 8', salida, 'N');
+  List.Linea(60, List.lineactual, tabla2.FieldByName('telefono').AsString, 3, 'Arial, normal, 8', salida, 'N');
+  List.Linea(75, List.lineactual, tabla2.FieldByName('email').AsString, 4, 'Arial, normal, 8', salida, 'N');
+  List.Linea(96, List.lineactual, tabla2.FieldByName('ajustedc').AsString, 5, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTProfesional.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listado de la clase
+begin
+  if orden = 'A' then tperso.IndexFieldNames := 'Nombre';
+  list_Tit(salida);
+
+  tperso.First;
+  while not tperso.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tperso.FieldByName('idprof').AsString >= iniciar) and (tperso.FieldByName('idprof').AsString <= finalizar) then List_linea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tperso.FieldByName('idprof').AsString < iniciar) or (tperso.FieldByName('idprof').AsString > finalizar) then List_linea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tperso.FieldByName('nombre').AsString >= iniciar) and (tperso.FieldByName('nombre').AsString <= finalizar) then List_linea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tperso.FieldByName('nombre').AsString < iniciar) or (tperso.FieldByName('nombre').AsString > finalizar) then List_linea(salida);
+
+      tperso.Next;
+    end;
+    List.FinList;
+
+    tperso.IndexFieldNames := tperso.IndexFieldNames;
+    tperso.First;
+end;
+
+procedure TTProfesional.BuscarPorCodigo(xexpr: string);
+begin
+  if not (tperso.active) then tperso.Open; 
+  tperso.IndexFieldNames := 'Idprof';
+  tperso.FindNearest([xexpr]);
+end;
+
+procedure TTProfesional.BuscarPorNombre(xexpr: string);
+begin
+  if not (tperso.active) then tperso.Open; 
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.FindNearest([xexpr]);
+end;
+
+function TTProfesional.setProfesionalesAlf: TQuery;
+// Objetivo...: retornar los profesionales en un set
+begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM profesio ORDER BY Nombre');
+end;
+
+function TTProfesional.setProfesionalesAlfRetIVA: TQuery;
+// Objetivo...: retornar los profesionales en un set
+begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM profesio, profesih WHERE profesio.idprof = profesih.idprof and retieneiva = ' + '''' + 'S' + '''' + ' ORDER BY Nombre');
+end;
+
+procedure TTProfesional.RegistrarCategorizacion(xidprof, xperiodo, xcategoria: String);
+// Objetivo...: Registrar Categorización
+begin
+  if datosdb.Buscar(categorias, 'idprof', 'periodo', xidprof, xperiodo) then categorias.Edit else categorias.Append;
+  categorias.FieldByName('idprof').AsString    := xidprof;
+  categorias.FieldByName('periodo').AsString   := xperiodo;
+  categorias.FieldByName('categoria').AsString := xcategoria;
+  try
+    categorias.Post
+   except
+    categorias.Cancel
+  end;
+  datosdb.refrescar(categorias);
+  CargarLista;
+end;
+
+function  TTProfesional.setPorcentajeCategoria(xidprof: String): real;
+Begin
+  getDatos(xidprof);
+  categoria.getDatos(idcategoria);
+  Result := categoria.porcUB;
+end;
+
+procedure TTProfesional.SincronizarCategoria(xidprof, xperiodo: String);
+// Objetivo...: Sincronizar Categoría
+var
+  i: Integer;
+Begin
+  if lista <> Nil then Begin
+    For i := lista.Count downto 1 do Begin
+      if (xidprof = Copy(lista.Strings[i-1], 1, 6)) and (Copy(lista.Strings[i-1], 7, 6) <=  Copy(xperiodo, 4, 4) + Copy(xperiodo, 1, 2)) then Begin
+        Idcategoria := Copy(lista.Strings[i-1], 14, 1);
+        categoria.getDatos(Idcategoria);
+        porcUB := categoria.porcUB;
+        Break;
+      end;
+    end;
+  end;
+end;
+
+function TTProfesional.setCambiosDeCategoria(xidprof: String): TStringList;
+// Objetivo...: Recuperar las Categorías
+var
+  l: TStringList;
+  i: Integer;
+Begin
+  l := TStringList.Create;
+  For i := 1 to lista.Count do
+    if (xidprof = Copy(lista.Strings[i-1], 1, 6)) then l.Add(lista.Strings[i-1]);
+  Result := l;
+end;
+
+procedure TTProfesional.BorrarCategorizacion(xidprof, xperiodo: String);
+// Objetivo...: Borrar Categorizaciones
+Begin
+  if datosdb.Buscar(categorias, 'idprof', 'periodo', xidprof, xperiodo) then categorias.Delete;
+  datosdb.refrescar(categorias);
+  CargarLista;
+end;
+
+procedure TTProfesional.ObtenerUltimaCategorizacion(xidprof: String);
+// Objetivo...: Sincronizar Categoría
+var
+  i: Integer;
+Begin
+  if lista <> Nil then Begin
+    For i := lista.Count downto 1 do Begin
+      if (xidprof = Copy(lista.Strings[i-1], 1, 6)) then Begin
+        Idcategoria := Copy(lista.Strings[i-1], 14, 1);
+        Periodo     := Copy(lista.Strings[i-1], 7, 7);
+        Break;
+      end;
+    end;
+  end;
+end;
+
+procedure TTProfesional.CargarLista;
+// Objetivo...: Cargar Lista
+begin
+  lista.Clear;
+  categorias.First;
+  while not categorias.Eof do Begin
+    lista.Add(categorias.FieldByName('idprof').AsString + categorias.FieldByName('periodo').AsString + categorias.FieldByName('categoria').AsString);
+    categorias.Next;
+  end;
+end;
+
+function TTProfesional.BuscarProfesionalCUIT(xnrocuit: String): Boolean;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if tabla2.IndexFieldNames <> 'Nrocuit' then tabla2.IndexFieldNames := 'Nrocuit';
+  Result := tabla2.FindKey([xnrocuit]);
+  getDatos(tabla2.FieldByName('idprof').AsString);
+end;
+
+function  TTProfesional.BuscarPosiva(xidprof, xperiodo: String): Boolean;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Result := datosdb.Buscar(posiva, 'idprof', 'periodo', xidprof, xperiodo);
+end;
+
+procedure TTProfesional.RegistrarPosiva(xidprof, xperiodo, xretieneiva, xajustedc: String);
+// Objetivo...: cerrar tablas de persistencia
+var
+  per: String;
+begin
+  per := Copy(xperiodo, 1, 2) + Copy(xperiodo, 4, 4);
+  if BuscarPosiva(xidprof, per) then posiva.Edit else posiva.Append;
+  posiva.FieldByName('idprof').AsString     := xidprof;
+  posiva.FieldByName('periodo').AsString    := per;
+  posiva.FieldByName('retieneiva').AsString := xretieneiva;
+  posiva.FieldByName('ajustedc').AsString   := xajustedc;
+  posiva.FieldByName('periodo1').AsInteger := StrToInt(copy (per, 3, 4) + copy(per, 1, 2) );
+  try
+    posiva.Post
+   except
+    posiva.Cancel
+  end;
+  datosdb.closeDB(posiva); posiva.Open;
+  CargarListaRet;
+end;
+
+procedure TTProfesional.BorrarPosiva(xidprof, xperiodo: String);
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if BuscarPosiva(xidprof, Copy(xperiodo, 1, 2) + Copy(xperiodo, 4, 4)) then Begin
+    posiva.Delete;
+    datosdb.closeDB(posiva); posiva.Open;
+    CargarListaRet;
+  end;
+end;
+
+procedure  TTProfesional.getDatosPosiva(xidprof, xperiodo: String);
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if BuscarPosiva(xidprof, Copy(xperiodo, 1, 2) + Copy(xperiodo, 4, 4)) then Begin
+    PeriodoIva := Copy(posiva.FieldByName('xperiodo').AsString, 1, 2) + '/' + Copy(posiva.FieldByName('xperiodo').AsString, 3, 4);
+    Retieneiva := posiva.FieldByName('retieneiva').AsString;
+    AjusteDC   := posiva.FieldByName('ajustedc').AsString;
+  end else Begin
+    PeriodoIva := '';
+    Retieneiva := '';
+    AjusteDC   := '';
+  end;
+end;
+
+function  TTProfesional.setListaPosiva(xidprof: String): TObjectList;
+// Objetivo...: cerrar tablas de persistencia
+var
+  l: TObjectList;
+  objeto: TTProfesional;
+begin
+  if not (posiva.Active) then posiva.Open;
+  l := TObjectList.Create;
+  posiva.IndexFieldNames := 'IDPROF;PERIODO1';
+  datosdb.Filtrar(posiva, 'idprof = ' + '''' + xidprof + '''');
+  posiva.First;
+  while not posiva.Eof do Begin
+    objeto := TTProfesional.Create;
+    objeto.codigo       := posiva.FieldByName('idprof').AsString;
+    objeto.PeriodoIva   := Copy(posiva.FieldByName('periodo').AsString, 1, 2) + '/' + Copy(posiva.FieldByName('periodo').AsString, 3, 4);
+    objeto.retieneiva   := posiva.FieldByName('retieneiva').AsString;
+    objeto.ajustedc     := posiva.FieldByName('ajustedc').AsString;
+    l.Add(objeto);
+    posiva.Next;
+  end;
+  datosdb.QuitarFiltro(posiva);
+  posiva.IndexFieldNames := 'IDPROF;PERIODO';
+  
+  Result := l;
+end;
+
+procedure TTProfesional.SincronizarListaRetIVA(xperiodo, xidprof: String);
+// objetivo...: Sincronizar Condicion I.V.A.
+var
+  i: Integer;
+  objeto: TTProfesional;
+Begin
+  for i := 1 to lista1.Count do Begin
+    objeto := TTProfesional(lista1.Items[i-1]);
+    if objeto.codigo = xidprof then Begin
+      if (strtoint(Copy(objeto.PeriodoIva, 4, 4) + Copy(objeto.PeriodoIva, 1, 2))) <= (strtoint(Copy(xperiodo, 4, 4) + Copy(xperiodo, 1, 2))) then Begin
+        Retieneiva := objeto.Retieneiva;
+        ajustedc   := objeto.AjusteDC;
+      end;
+      //utiles.msgError((Copy(objeto.PeriodoIva, 4, 4) + Copy(objeto.PeriodoIva, 1, 2)) + '  xperiodo =    ' + (Copy(xperiodo, 4, 4) + Copy(xperiodo, 1, 2)) + '    ' + retieneiva);
+    end;
+  end;
+end;
+
+procedure  TTProfesional.CargarListaRet;
+// Objetivo...: cerrar tablas de persistencia
+var
+  objeto: TTProfesional;
+begin
+  if (lista1 = nil) then lista1 := TObjectList.Create else lista1.Clear;
+  if not (posiva.Active) then posiva.Open;
+  posiva.IndexFieldNames := 'IDPROF;PERIODO1';
+  posiva.First;
+  while not posiva.Eof do Begin
+    objeto := TTProfesional.Create;
+    objeto.codigo       := posiva.FieldByName('idprof').AsString;
+    objeto.PeriodoIva   := Copy(posiva.FieldByName('periodo').AsString, 1, 2) + '/' + Copy(posiva.FieldByName('periodo').AsString, 3, 4);
+    objeto.retieneiva   := posiva.FieldByName('retieneiva').AsString;
+    objeto.ajustedc     := posiva.FieldByName('ajustedc').AsString;
+    lista1.Add(objeto);
+    posiva.Next;
+  end;
+  posiva.IndexFieldNames := 'IDPROF;PERIODO';
+end;
+
+procedure TTProfesional.FiltrarLaboratoriosFacturacionGlobal;
+begin
+  datosdb.Filtrar(tperso, 'factglobal = ' + '''' + 'S' + '''');
+end;
+
+procedure TTProfesional.FiltrarLaboratoriosNormales;
+begin
+  datosdb.Filtrar(tperso, 'factglobal <> ' + '''' + 'S' + '''');
+end;
+
+procedure TTProfesional.QuitarFiltro;
+begin
+  datosdb.QuitarFiltro(tperso);
+end;
+
+procedure TTProfesional.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  categoria.conectar;
+  if conexiones = 0 then Begin
+    if not tperso.Active then tperso.Open;
+    tperso.FieldByName('idprof').DisplayLabel := 'Id.'; tperso.FieldByName('nombre').DisplayLabel := 'Nombre'; tperso.FieldByName('direccion').DisplayLabel := 'Dirección'; tperso.FieldByName('cp').Visible := False; tperso.FieldByName('orden').Visible := False; tperso.FieldByName('localidad').Visible := False;
+    if not tabla2.Active then tabla2.Open;
+    if not categorias.Active then categorias.Open;
+    if not posiva.Active then posiva.Open;
+    if (length(trim(posiva.FieldByName('periodo1').AsString)) = 0) then begin
+       posiva.First;
+       while not posiva.Eof do Begin
+        posiva.Edit;
+        posiva.FieldByName('periodo1').AsInteger := StrToInt(copy(posiva.FieldByName('periodo').AsString, 3, 4) + copy(posiva.FieldByName('periodo').AsString, 1, 2) );
+        try
+          posiva.Post
+         except
+          posiva.Cancel
+        end;
+        posiva.Next;
+       end;
+       datosdb.refrescar(posiva);
+    end;
+    CargarLista;
+    CargarListaRet;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTProfesional.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  categoria.desconectar;
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tperso);
+    datosdb.closeDB(tabla2);
+    datosdb.closeDB(categorias);
+    datosdb.closeDB(posiva);
+  end;
+end;
+
+{===============================================================================}
+
+function profesional: TTProfesional;
+begin
+  if xprofesional = nil then
+    xprofesional := TTProfesional.Create;
+  Result := xprofesional;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xprofesional.Free;
+
+end.

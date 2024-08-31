@@ -1,0 +1,438 @@
+unit CAdmNumCompr;
+
+interface
+
+uses CComregi, CTablaIva, CUtiles, SysUtils, CBDT, DBTables, CIDBFM, CListar;
+
+type
+
+TTAdministNumeracionComprobantes = class(TObject)
+  { Atributos para manejar los Tipos de Comprobantes }
+  Ncodcomp, Nidcompr, NCategoria, Ndescrip, Ncodmov, Ncontrolstock, Nnroinicial, Nnrofinal, Nnroactual, Ncodnumer, Nimpcompr, NcodRecibo, NidRecibo: string;
+  Nimpresora, Nnmaximo, Nrecibo, Ncantcopias, NResolucion, NimpRapida: integer;
+  { Atributos para el mamnejo de la numeración individual de cada comprobante }
+  NFcodnumer, NFnroinicial, NFnrofinal, NFnroactual, NFExpendio, NFDesExpen, NFImpCompr: string;
+
+  deffact, ctrlstock, tnumfact, ctrlimpf: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  { Procedimientos correspondiente al manejo de los comprobantes definidos }
+  function    BuscarDefF(xcodcomp, xidcompr, xcategoria: string): boolean;
+  procedure   BorrarDefF(xcodcomp, xidcompr, xcategoria: string);
+  procedure   GrabarDefF(xcodcomp, xidcompr, xcategoria, xdescrip, xcodmov: string);
+  procedure   EstablecerCodigoNumeracion(xcodcomp, xidcompr, xcategoria, xcodnumer, xnroinicial, xnrofinal, xnroactual: string; ximpresora, xnmaximo, xncantcopias, xresolucion: integer; xcontrolstock, ximpcompr: string);
+  procedure   getDatosDefF(xcodcomp, xidcompr, xcategoria: string);
+  procedure   FijarReciboPorDefecto(xcodcomp, xidcompr, xcategoria: string);
+  procedure   QuitarReciboPorDefecto(xcodcomp, xidcompr, xcategoria: string);
+  procedure   FijarComprobanteComoRemito(xcodcomp, xidcompr, xcategoria: string);
+  procedure   FijarPuntoDeVenta(xcodnumer, xpunto, xdescrip: string);
+  procedure   ImpresionRapida(xcodcompr: string; ximprapida: shortint);
+  procedure   getReciboPagos;
+  function    setComprobantesDefinidos: TQuery;
+  { Fin }
+
+  { Procedimientos correspondiente al manejo de la numeración de los comprobantes individuales }
+  function    BuscarNF(xcodnumer: string): boolean;
+  procedure   GrabarNF(xcodnumer, xnroinicial, xnrofinal, xnroactual, ximpcompr: string; ximpresora: shortint; xresolucion: integer);
+  procedure   getDatosNF(xcodnumer: string);
+  procedure   ActNuemeroActualNF(xnumero: string); overload;
+  procedure   ActNuemeroActualNF(xcodnumer, xnumero: string); overload;
+  function    getNroSiguienteNF(xcodnumer: string): string;
+  function    getNroActual(xcodnumer: string): string;
+
+  { Fin }
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  archivo: TextFile;
+  procedure   BorrarNF(xcodnumer: string);
+ protected
+  { Declaraciones Protegidas }
+end;
+
+function administNum: TTAdministNumeracionComprobantes;
+
+implementation
+
+var
+  xfactventa: TTAdministNumeracionComprobantes = nil;
+
+constructor TTAdministNumeracionComprobantes.Create;
+begin
+  inherited Create;
+  deffact   := datosdb.openDB('deffact', 'Codcomp;Idcompr;Categoria', '', dbs.baseDat);                                        // Definición de comoprobantes
+  ctrlstock := datosdb.openDB('ctrlstock', 'controlstock', '', dbs.baseDat);                          // Verif. de control de stock
+  tnumfact  := datosdb.openDB('numfact', 'Codnumer', '', dbs.baseDat);                                // Numeración de comprobantes - mantenimiento
+  ctrlimpf  := TTable.Create(nil);
+  ctrlimpf.TableName := 'ctrlimpf';
+end;
+
+destructor TTAdministNumeracionComprobantes.Destroy;
+begin
+  inherited Destroy;
+end;
+
+//******************************************************************************
+{ Métodos para la definición de comprobantes }
+
+function TTAdministNumeracionComprobantes.BuscarDefF(xcodcomp, xidcompr, xcategoria: string): boolean;
+begin
+  if conexiones = 0 then conectar;
+  Result := datosdb.Buscar(deffact, 'codcomp', 'idcompr', 'categoria', xcodcomp, xidcompr, xcategoria);
+end;
+
+procedure TTAdministNumeracionComprobantes.GrabarDefF(xcodcomp, xidcompr, xcategoria, xdescrip, xcodmov: string);
+// Objetivo...: Grabar los Atributos
+begin
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then deffact.Edit else Begin
+    deffact.Append;
+    deffact.FieldByName('codnumer').AsInteger  := 0;
+    deffact.FieldByName('impresora').AsInteger := 0;
+    deffact.FieldByName('nmaximo').AsInteger   := 0;
+    deffact.FieldByName('recibo').AsInteger    := 0;
+    deffact.FieldByName('codnumer').AsInteger  := 0;
+  end;
+  deffact.FieldByName('codcomp').AsString    := xcodcomp;
+  deffact.FieldByName('idcompr').AsString    := xidcompr;
+  deffact.FieldByName('categoria').AsString  := xcategoria;
+  deffact.FieldByName('descrip').AsString    := xdescrip;
+  deffact.FieldByName('codmov').AsString     := xcodmov;
+  try
+    deffact.Post;
+  except
+    deffact.Cancel;
+  end;
+end;
+
+procedure TTAdministNumeracionComprobantes.EstablecerCodigoNumeracion(xcodcomp, xidcompr, xcategoria, xcodnumer, xnroinicial, xnrofinal, xnroactual: string; ximpresora, xnmaximo, xncantcopias, xresolucion: integer; xcontrolstock, ximpcompr: string);
+begin
+ // Actualizamos los datos correspondientes a la numeración del comprobante
+ if BuscarDefF(xcodcomp, xidcompr, xcategoria) then Begin
+   //utiles.msgError(inttostr(xncantcopias) + '  ' + inttostr(ximpresora));
+   deffact.Edit;
+   deffact.FieldByName('codnumer').AsString    := xcodnumer;
+   deffact.FieldByName('impresora').AsInteger  := ximpresora;
+   deffact.FieldByName('nmaximo').AsInteger    := xnmaximo;
+   deffact.FieldByName('cantcopias').AsInteger := xncantcopias;
+   deffact.FieldByName('impcompr').AsString    := ximpcompr;
+   if deffact.FieldByName('recibo').AsInteger < 1 then deffact.FieldByName('recibo').AsInteger    := 0;
+   try
+     deffact.Post
+   except
+     deffact.Cancel
+   end;
+ end;
+ GrabarNF(xcodnumer, xnroinicial, xnrofinal, xnroactual, ximpcompr, ximpresora, xresolucion);
+ AssignFile(archivo,  dbs.dirSistema + '\ctrlStock.ini');
+ Rewrite(archivo);
+ WriteLn(archivo, xcontrolstock);
+ closeFile(archivo);
+end;
+
+procedure TTAdministNumeracionComprobantes.getDatosDefF(xcodcomp, xidcompr, xcategoria: string);
+// Objetivo...: Actualizar los atributos de un comprobante
+begin
+  utiles.msgError(xcodcomp + xidcompr + xcategoria);
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then Begin
+    Ncodcomp    := deffact.FieldByName('codcomp').AsString;
+    Nidcompr    := deffact.FieldByName('idcompr').AsString;
+    Ncategoria  := deffact.FieldByName('categoria').AsString;
+    Ndescrip    := deffact.FieldByName('descrip').AsString;
+    Ncodmov     := deffact.FieldByName('codmov').AsString;
+    Ncodnumer   := deffact.FieldByName('codnumer').AsString;
+    Nimpresora  := deffact.FieldByName('impresora').AsInteger;
+    Nnmaximo    := deffact.FieldByName('nmaximo').AsInteger;
+    Nrecibo     := deffact.FieldByName('recibo').AsInteger;
+    Ncantcopias := deffact.FieldByName('cantcopias').AsInteger;
+  end else begin
+    Ncodcomp := ''; Nidcompr := ''; NCategoria := ''; Ndescrip := ''; Ncodmov := ''; Ncodnumer := ''; Nimpresora := 0; Nnmaximo := 0; Nrecibo := 0; Ncantcopias := 1;
+  end;
+  // Extraigo la información pertinente a la numeración del comprobante
+  getDatosNF(Ncodnumer);
+  Nnroinicial := NFnroinicial;
+  Nnrofinal   := NFnrofinal;
+  Nnroactual  := NFnroactual;
+
+  if FileExists(dbs.dirSistema + '\ctrlStock.ini') then Begin
+    AssignFile(archivo,  dbs.dirSistema + '\ctrlStock.ini');
+    Reset(archivo);
+    ReadLn(archivo, Ncontrolstock);
+    closeFile(archivo);
+  end else Ncontrolstock := 'N';
+
+  //if Ncantcopias = 0 then Ncantcopias := 1;
+end;
+
+procedure TTAdministNumeracionComprobantes.BorrarDefF(xcodcomp, xidcompr, xcategoria: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then Begin
+    BorrarNF(deffact.FieldByName('codnumer').AsString);
+    deffact.Delete;
+    getDatosDefF(deffact.FieldByName('codcomp').AsString, deffact.FieldByName('idcompr').AsString, deffact.FieldByName('categoria').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+  end;
+end;
+
+function  TTAdministNumeracionComprobantes.setComprobantesDefinidos: TQuery;
+// Objetivo...: Devolver un set de comprobantes definidos - habilitados para esta factura
+begin
+  Result := datosdb.tranSQL('SELECT * FROM ' + deffact.TableName);
+end;
+
+//******************************************************************************
+{ Métodos para controlar la numeración - correlatividad - de los comprobantes }
+function TTAdministNumeracionComprobantes.BuscarNF(xcodnumer: string): boolean;
+begin
+  if not tnumfact.Active then tnumfact.Open;
+  if tnumfact.FindKey([xcodnumer]) then Result := True else Result := False;
+end;
+
+procedure TTAdministNumeracionComprobantes.GrabarNF(xcodnumer, xnroinicial, xnrofinal, xnroactual, ximpcompr: string; ximpresora: shortint; xresolucion: integer);
+// Objetivo...: Grabar los Atributos
+begin
+  if BuscarNF(xcodnumer) then tnumfact.Edit else tnumfact.Append;
+  tnumfact.FieldByName('codnumer').AsString   := xcodnumer;
+  tnumfact.FieldByName('nroinicial').AsString := xnroinicial;
+  tnumfact.FieldByName('nrofinal').AsString   := xnrofinal;
+  tnumfact.FieldByName('nroactual').AsString  := xnroactual;
+  try
+    tnumfact.Post;
+  except
+    tnumfact.Cancel;
+  end;
+  // Guardamos la configuración local de la impresora
+  if ctrlimpf.FindKey([xcodnumer]) then ctrlimpf.Edit else ctrlimpf.Append;
+  ctrlimpf.FieldByName('codnumer').AsString    := xcodnumer;
+  ctrlimpf.FieldByName('impresora').AsInteger  := ximpresora;
+  ctrlimpf.FieldByName('resolucion').AsInteger := xresolucion;
+  ctrlimpf.FieldByName('impcompr').AsString    := ximpcompr;
+  try
+    ctrlimpf.Post
+  except
+    ctrlimpf.Cancel
+  end;
+end;
+
+procedure TTAdministNumeracionComprobantes.BorrarNF(xcodnumer: string);
+// Objetivo...: Quitar código de eliminación
+begin
+  if tnumfact.FindKey([xcodnumer]) then tnumfact.Delete;
+end;
+
+procedure TTAdministNumeracionComprobantes.FijarPuntoDeVenta(xcodnumer, xpunto, xdescrip: string);
+// Objetivo...: Fijar punto de venta para un comprobante dado
+begin
+  if BuscarNF(xcodnumer) then Begin
+    tnumfact.Edit;
+    tnumfact.FieldByName('expendio').AsString := xpunto;
+    tnumfact.FieldByName('descrip').AsString  := xdescrip;
+    try
+      tnumfact.Post;
+    except
+      tnumfact.Cancel;
+    end;
+  end;
+end;
+
+procedure TTAdministNumeracionComprobantes.getDatosNF(xcodnumer: string);
+// Objetivo...: Actualizar los atributos de un comprobante
+begin
+  if BuscarNF(xcodnumer) then
+    begin
+      NFcodnumer   := tnumfact.FieldByName('codnumer').AsString;
+      NFnroinicial := tnumfact.FieldByName('nroinicial').AsString;
+      NFnrofinal   := tnumfact.FieldByName('nrofinal').AsString;
+      NFnroactual  := tnumfact.FieldByName('nroactual').AsString;
+      NFExpendio   := tnumfact.FieldByName('expendio').AsString;
+      NFDesExpen   := tnumfact.FieldByName('descrip').AsString;
+    end
+  else
+    begin
+      NFcodnumer := ''; NFnroinicial := ''; NFnrofinal := ''; NFnroactual := ''; NFExpendio := ''; NFDesExpen := ''; NImpcompr := ''; NFImpCompr := '';
+    end;
+  // Extraemos la impresora para la emisión
+  Nimpresora := 0; Nresolucion := 0; NImpRapida  := 0;
+  if not ctrlimpf.Active then ctrlimpf.Open;
+  if ctrlimpf.FindKey([xcodnumer]) then Begin
+    Nimpresora  := ctrlimpf.FieldByName('impresora').AsInteger;
+    Nresolucion := ctrlimpf.FieldByName('resolucion').AsInteger;
+    NImpRapida  := ctrlimpf.FieldByName('imprapida').AsInteger;
+    Nimpcompr   := ctrlimpf.FieldByName('impcompr').AsString;
+  end;
+  NFImpCompr := Nimpcompr;
+end;
+
+procedure TTAdministNumeracionComprobantes.ActNuemeroActualNF(xnumero: string);
+// Objetivo...: Actualizamos la Instancia del Comprobante
+begin
+  if conexiones = 0 then conectar;
+  if BuscarNF(NFcodnumer) then
+    begin
+      tnumfact.Edit;
+      tnumfact.FieldByName('nroactual').AsString := xnumero;
+      try
+        tnumfact.Post;
+      except
+        tnumfact.Cancel;
+      end;
+      datosdb.closeDB(tnumfact);
+      tnumfact.Open;
+    end;
+end;
+
+procedure TTAdministNumeracionComprobantes.ActNuemeroActualNF(xcodnumer, xnumero: string);
+// Objetivo...: Actualizamos la Instancia del Comprobante
+begin
+  NFcodnumer := xcodnumer;
+  ActNuemeroActualNF(xnumero);
+end;
+
+procedure TTAdministNumeracionComprobantes.FijarReciboPorDefecto(xcodcomp, xidcompr, xcategoria: string);
+// Objetivo...: Fijar el comprobante que será tomado como recibo - por defecto, para la liquidación de entregas iniciales
+begin
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then
+    begin
+      deffact.Edit;
+      deffact.FieldByName('recibo').AsInteger := 1;
+      try
+        deffact.Post
+      except
+        deffact.Cancel
+      end;
+    end;
+end;
+
+procedure TTAdministNumeracionComprobantes.QuitarReciboPorDefecto(xcodcomp, xidcompr, xcategoria: string);
+// Objetivo...: Quitar el comprobante que será tomado como recibo - por defecto, para la liquidación de entregas iniciales
+begin
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then
+    begin
+      deffact.Edit;
+      deffact.FieldByName('recibo').AsInteger := 0;
+      try
+        deffact.Post
+      except
+        deffact.Cancel
+      end;
+    end;
+end;
+
+procedure TTAdministNumeracionComprobantes.FijarComprobanteComoRemito(xcodcomp, xidcompr, xcategoria: string);
+// Objetivo...: Fijar el comprobante que será tomado como recibo - por defecto, para la liquidación de entregas iniciales
+begin
+  if BuscarDefF(xcodcomp, xidcompr, xcategoria) then
+    begin
+      deffact.Edit;
+      deffact.FieldByName('recibo').AsInteger := 2;
+      try
+        deffact.Post
+      except
+        deffact.Cancel
+      end;
+    end;
+end;
+
+procedure TTAdministNumeracionComprobantes.getReciboPagos;
+// Objetivo...: Buscar Recibo para Liquidar pagos como Entregas iniciales
+var
+  c, i, t: string;
+begin
+  c := deffact.FieldByName('codcomp').AsString; i := deffact.FieldByName('idcompr').AsString; t := deffact.FieldByName('categoria').AsString;
+  deffact.First;
+  NcodRecibo := '';
+  NidRecibo  := '';
+  while not deffact.EOF do Begin
+    if deffact.FieldByName('recibo').AsInteger = 1 then Begin
+      NcodRecibo := deffact.FieldByName('codcomp').AsString;
+      NidRecibo  := deffact.FieldByName('idcompr').AsString;
+      getDatosDefF(Ncodcomp, Nidcompr, Ncategoria);
+      Break;
+    end;
+    deffact.Next;
+  end;
+  getDatosDefF(c, i, t);
+end;
+
+function TTAdministNumeracionComprobantes.getNroSiguienteNF(xcodnumer: string): string;
+// Objetivo...: retornar el siguiente
+begin
+  NFnroactual := '1';
+  //if BuscarNF(NFcodnumer) then NFnroactual := IntToStr(tnumfact.FieldByName('nroactual').AsInteger + 1);
+  if BuscarNF(xcodnumer) then NFnroactual := IntToStr(tnumfact.FieldByName('nroactual').AsInteger + 1);
+  Result := NFnroactual;
+end;
+
+function TTAdministNumeracionComprobantes.getNroActual(xcodnumer: string): string;
+// Objetivo...: retornar el nro. actual
+begin
+  if BuscarNF(xcodnumer) then Result := tnumfact.FieldByName('nroactual').AsString else Result := '0';
+end;
+
+procedure TTAdministNumeracionComprobantes.ImpresionRapida(xcodcompr: string; ximprapida: shortint);
+// Objetivo...: Fijar el modo de impresion
+begin
+  if ctrlimpf.FindKey([xcodcompr]) then Begin
+    ctrlimpf.Edit;
+    ctrlimpf.FieldByName('imprapida').AsInteger := ximprapida;
+    try
+      ctrlimpf.Post
+    except
+      ctrlimpf.Cancel
+    end;
+  end;
+end;
+
+procedure TTAdministNumeracionComprobantes.conectar;
+// Objetivo...: Conectar tabla de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not deffact.Active then deffact.Open;
+    deffact.FieldByName('codnumer').Visible := False; deffact.FieldByName('impresora').Visible := False;
+    deffact.FieldByName('codcomp').DisplayLabel := 'Tipo'; deffact.FieldByName('idcompr').DisplayLabel := 'Comp.'; deffact.FieldByName('descrip').DisplayLabel := 'Descripción'; deffact.FieldByName('codnumer').DisplayLabel := 'Cód. Num';
+    if not ctrlstock.Active then ctrlstock.Open;
+    if not tnumfact.Active then tnumfact.Open;
+    ctrlstock.First;
+    Ncontrolstock := ctrlstock.FieldByName('controlstock').AsString;
+    ctrlimpf.Open;
+  end;
+  compregis.conectar;
+  Inc(conexiones);
+end;
+
+procedure TTAdministNumeracionComprobantes.desconectar;
+// Objetivo...: Cerrar tabla de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(deffact);
+    datosdb.closeDB(ctrlstock);
+    datosdb.closeDB(tnumfact);
+    ctrlimpf.Close;
+  end;
+  compregis.desconectar;
+end;
+//******************************************************************************
+
+{===============================================================================}
+
+function administNum: TTAdministNumeracionComprobantes;
+begin
+  if xfactventa = nil then
+    xfactventa := TTAdministNumeracionComprobantes.Create;
+  Result := xfactventa;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xfactventa.Free;
+
+end.

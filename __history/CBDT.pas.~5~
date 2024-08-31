@@ -1,0 +1,339 @@
+unit CBDT;
+
+interface
+
+uses SysUtils, DB, DBTables, CUtiles, Forms;
+
+type
+
+TTdbs = class(TObject)
+  puente, BaseClientServ, usuario, password, baseDat, baseDat_N, baseDat_N1, StoredProc, SepaDecimal, SepaMiles, DirSistema, DatosHistoricos: string;
+  db1, us1, pa1, db2, us2, pa2, _driver: String;    // A partir de la segunda base de datos
+  TDB, TDB1, TDB2, HIST: TDataBase; t: TTable;
+  intervalorefresco: integer; Trial: Boolean;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  destroy; override;
+
+  procedure   NuevaBaseDeDatos(xdriver, xusuario, xpassword: String);
+  procedure   NuevaBaseDeDatos2(xdriver, xusuario, xpassword: String);
+  procedure   desconectar;
+  procedure   desconectarDB;
+  procedure   desconectarDB2;
+
+  procedure   puenteODBC(xpuente, xusuario, xpassword, xBaseClientServ: string);
+  procedure   GuardarConfiguracionRegional(xsepadecimales, xsepamiles: string);
+  procedure   getDatos;
+
+  function    BDhistorico: string;
+  procedure   ConfigurarBackup(xopcion: shortint);
+  function    setOpcionBackup: shortint;
+  function    setDiasBack: shortint;
+  procedure   EstablecerDias(xdiasback: ShortInt);
+
+  procedure   getParametrosDB1;
+  procedure   getParametrosDB2;
+ private
+  { Declaraciones Privadas }
+  i: integer; xpassword: string;
+end;
+
+function dbs: TTdbs;
+
+implementation
+
+var
+  xdbs: TTdbs = nil;
+
+constructor TTdbs.Create;
+begin
+  inherited Create;
+  if FileExists('drvconect.db') then Begin
+    if TDB = nil then TDB := TDataBase.Create(nil);
+    if t   = nil then t := TTable.Create(nil);
+
+    t.TableName := 'drvconect';
+
+    t.Open;           // Conexión a la base de datos
+
+    BaseClientServ    := t.FieldByName('DBClientServ').AsString;
+    baseDat           := t.FieldByName('Odbcdrv').AsString;
+    intervalorefresco := 7000;
+
+    _driver := t.FieldByName('Odbcdrv').AsString;
+
+    tDB.DatabaseName := 'PersistObjetos';
+    tDB.LoginPrompt  := False;
+    if t.FieldByName('DBClientServ').AsString = 'S' then Begin   // Conexiones ODBC
+      tDB.AliasName  := t.FieldByName('Odbcdrv').AsString;
+      baseDat        := 'PersistObjetos';
+      tDB.Params.Add('USER NAME=' + t.FieldByName('usuario').AsString);
+      tDB.Params.Add('PASSWORD=' + t.FieldByName('password').AsString);
+      xpassword      := t.FieldByName('password').AsString;
+      StoredProc     := t.FieldByName('StoredProc').AsString;
+    end else Begin                                              // Conexiones Standard - Paradox o dBase
+      tDB.DriverName := 'STANDARD';
+      tDB.Params.Clear;
+      tDB.Params.Add('PATH=' + t.FieldByName('Odbcdrv').AsString);
+      i := Pos('arch', LowerCase(t.FieldByName('Odbcdrv').AsString));
+      StoredProc := 'N';
+    end;
+
+    DatosHistoricos := 'HISTORICO';
+
+    getDatos;
+    tDB.LoginPrompt  := False;
+    tDB.Open;
+    t.Close;
+  end;
+end;
+
+destructor TTdbs.Destroy;
+begin
+  desconectar;
+  if TDB <> Nil then TDB.Destroy;
+  if t <> Nil then t.Destroy;
+  inherited Destroy;
+end;
+
+procedure TTdbs.NuevaBaseDeDatos(xdriver, xusuario, xpassword: String);
+begin
+  ///if TDB1 = nil then TDB1 := TDataBase.Create(nil);
+  if TDB1 = nil then Begin
+  TDB1 := TDataBase.Create(nil);
+  tdb.Close;
+  if Length(Trim(xpassword)) > 0 then Begin   // Conexiones ODBC
+    tDB1.DatabaseName := xdriver; //'PersistObjetos_1i';
+    tDB1.AliasName    := xdriver;
+    baseDat_N         := xdriver; //'PersistObjetos_1i';
+    tDB1.Params.Add('USER NAME=' + xusuario);
+    tDB1.Params.Add('PASSWORD=' + xpassword);
+  end else Begin                  // Conexiones Standard - Paradox o dBase
+    tDB1.DatabaseName  := 'db1';
+    tDB1.DriverName   := 'STANDARD';
+    tDB1.Params.Clear;
+    tDB1.Params.Add('PATH=' + xdriver);
+    StoredProc        := 'N';
+  end;
+
+  tDB1.LoginPrompt  := False;
+  tDB1.Open;
+  end;
+end;
+
+procedure TTdbs.NuevaBaseDeDatos2(xdriver, xusuario, xpassword: String);
+begin
+  if TDB2 = nil then Begin
+  TDB2 := TDataBase.Create(nil);
+  if Length(Trim(xpassword)) > 0 then Begin   // Conexiones ODBC
+    tDB2.DatabaseName := xdriver; //'PersistObjetos_1i';
+    tDB2.AliasName    := xdriver;
+    baseDat_N1        := xdriver; //'PersistObjetos_1i';
+    tDB2.Params.Add('USER NAME=' + xusuario);
+    tDB2.Params.Add('PASSWORD=' + xpassword);
+  end else Begin                                              // Conexiones Standard - Paradox o dBase
+    tDB2.DriverName := 'STANDARD';
+    tDB2.Params.Clear;
+    tDB2.Params.Add('PATH=' + xdriver);
+    i := Pos('arch', LowerCase(t.FieldByName('Odbcdrv').AsString));
+    StoredProc := 'N';
+  end;
+
+  tDB2.LoginPrompt  := False;
+  tDB2.Open;
+  end;
+end;
+
+procedure TTdbs.desconectar;
+// Objetivo...: desconectar la base de Persistencia de objetos
+begin
+  if TDB <> Nil then Begin
+    tDB.CloseDataSets;
+    tDB.Close;
+  end;
+  if TDB1 <> Nil then Begin
+    tDB1.CloseDataSets;
+    tDB1.Close;
+  end;
+  if HIST <> Nil then Begin
+    HIST.CloseDataSets;
+    HIST.Close;
+  end;
+end;
+
+procedure TTdbs.desconectarDB;
+// Objetivo...: desconectar la base de Persistencia de objetos
+begin
+  if TDB1 <> Nil then Begin
+    tDB1.CloseDataSets;
+    tDB1.Close;
+  end;
+end;
+
+procedure TTdbs.desconectarDB2;
+// Objetivo...: desconectar la base de Persistencia de objetos
+begin
+  if TDB2 <> Nil then Begin
+    tDB2.CloseDataSets;
+    tDB2.Close;
+  end;
+end;
+
+procedure TTdbs.puenteODBC(xpuente, xusuario, xpassword, xBaseClientServ: string);
+// Objetivo...: Definir el sistema de soporte de Persistencia - ODBC, Nativo
+begin
+  t.Open;
+  if Length(trim(xpuente)) > 0 then Begin
+    if t.RecordCount > 0 then t.Edit else t.Append;
+    t.FieldByName('Odbcdrv').AsString      := xpuente;
+    t.FieldByName('usuario').AsString      := xusuario;
+    t.FieldByName('password').AsString     := xpassword;
+    t.FieldByName('DBClientServ').AsString := xBaseClientServ;
+    try
+      t.Post
+    except
+      t.Cancel
+    end;
+  end;
+  t.Close;
+end;
+
+procedure TTdbs.getDatos;
+// Objetivo...: Cargar los atributos definidos
+begin
+  if not t.Active then t.Open;
+  t.First;
+  if t.RecordCount > 0 then Begin
+    puente         := t.FieldByName('Odbcdrv').AsString;
+    BaseClientServ := t.FieldByName('DBClientServ').AsString;
+    usuario        := t.FieldByName('usuario').AsString;
+    password       := t.FieldByName('password').AsString;
+    sepadecimal    := t.FieldByName('sepdecimal').AsString;
+    sepamiles      := t.FieldByName('sepmiles').AsString;
+    //DirSistema     := t.FieldByName('DirSistema').AsString;
+  end;
+  if t.Active then t.Close;
+  DirSistema := Copy(ExtractFilePath(Application.ExeName), 1, Length(ExtractFilePath(Application.ExeName))-1);
+end;
+
+function TTdbs.BDhistorico: string;
+// Objetivo...: retornar la base de datos para los archivos históricos
+begin
+  if BaseClientServ = 'S' then Begin
+    if HIST = nil then Begin
+      HIST := TDataBase.Create(nil);
+      HIST.DatabaseName := DatosHistoricos;
+      HIST.LoginPrompt  := False;
+      HIST.AliasName    := DatosHistoricos;
+      HIST.Params.Add('PASSWORD=' + xpassword);
+      HIST.Params.Add('USER NAME=' + usuario);
+      HIST.Open;
+    end;
+    Result := DatosHistoricos;
+   end
+  else
+   Result := dirSistema + '\historico';
+end;
+
+procedure TTdbs.GuardarConfiguracionRegional(xsepadecimales, xsepamiles: string);
+// Objetivo...: guardar opciones de configuración regional
+begin
+  t.Open;
+  if t.recordcount > 0 then Begin
+    t.Edit;
+    t.FieldByName('sepdecimal').AsString := xsepadecimales;
+    t.FieldByName('sepmiles').AsString   := xsepamiles;
+    try
+      t.Post
+    except
+      t.Cancel
+    end;
+  end;
+  t.Close;
+end;
+
+procedure TTdbs.ConfigurarBackup(xopcion: shortint);
+// Objetivo...: Guardar opcion de Backup
+begin
+  t.Open;
+  if t.recordcount > 0 then Begin
+    t.First; t.Edit;
+    t.FieldByName('backup').AsInteger := xopcion;
+    try
+      t.Post
+    except
+      t.Cancel
+    end;
+  end;
+  t.Close;
+end;
+
+function  TTdbs.setOpcionBackup: shortint;
+// Objetivo...: devolver la opción actual de Backup
+begin
+  Result := 1;
+  t.Open;
+  if t.recordcount > 0 then Result := t.FieldByName('backup').AsInteger;
+  t.Close;
+end;
+
+function  TTdbs.setDiasBack: shortint;
+// Objetivo...: devolver la opción actual de Backup
+begin
+  Result := 1;
+  t.Open;
+  if t.recordcount > 0 then Result := t.FieldByName('diasback').AsInteger;
+  t.Close;
+end;
+
+procedure TTdbs.EstablecerDias(xdiasback: ShortInt);
+// Objetivo...: devolver la opción actual de Backup
+begin
+  t.Open;
+  if t.recordcount > 0 then Begin
+    t.Edit;
+    t.FieldByName('diasback').AsInteger := xdiasback;
+    try
+      t.Post
+     except
+      t.Cancel
+     end;
+  end;
+  t.Close;
+end;
+
+procedure  TTdbs.getParametrosDB1;
+Begin
+  if not t.Active then t.Open;
+  db1 := t.FieldByName('db1').AsString;
+  us1 := t.FieldByName('us1').AsString;
+  pa1 := t.FieldByName('pa1').AsString;
+  if t.Active then t.Close;
+end;
+
+procedure  TTdbs.getParametrosDB2;
+Begin
+  if not t.Active then t.Open;
+  db2 := t.FieldByName('db2').AsString;
+  us2 := t.FieldByName('us2').AsString;
+  pa2 := t.FieldByName('pa2').AsString;
+  if t.Active then t.Close;
+end;
+{===============================================================================}
+
+function dbs: TTdbs;
+begin
+  if xdbs = nil then
+    xdbs := TTdbs.Create;
+  Result := xdbs;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xdbs.Free;
+
+end.

@@ -1,0 +1,491 @@
+unit CPaciente;
+
+interface
+
+uses CPersona, CBDT, SysUtils, DB, DBTables, CUtiles, CListar, CIDBFM,
+     CObrasSociales, CServers2000_Excel, Classes, Jpeg;
+
+type
+
+TTPaciente = class(TTPersona)
+  Fenac, Telefono, Sexo, Compcel, Email, Edad: string;
+  tabla2, pacobsoc, pacfoto: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xcodigo: string): boolean;
+  procedure   Grabar(xcodigo, xnombre, xdomicilio, xcp, xorden, xfenac, xtelefono, xsexo, xcompcel, xemail: string);
+  procedure   Borrar(xcodigo: string);
+  procedure   getDatos(xcodigo: string);
+  function    setPacientes: TQuery;
+  function    setPacientesAlf: TQuery;
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   ListarPorObraSocial(orden, iniciar, finalizar, ent_excl: string; salida: char);
+
+  function    BuscarObsoc(xcodpac, xcodos: string): boolean;
+  procedure   GrabarObsoc(xcodpac, xcodos: string);
+  procedure   BorrarObsoc(xcodpac, xcodos: string);
+  function    setObrasSociales(xcodpac: string): TQuery;
+  function    verifObraSocial(xcodos: string): boolean;
+  procedure   BuscarPorCodigo(xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+
+  function    setLista: TStringList;
+
+  procedure   RegistrarFoto(xcodpac, xfoto: String);
+  function    setFoto(xcodpac: String): TJpegImage;
+  procedure   BorrarFoto(xcodpac: String);
+
+  procedure   vaciarBuffer;
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  lista: TStringList;
+  conexiones, espacios: shortint; codosanter, nf: string; fila, cantidad: Integer;
+  procedure   List_linea(salida: char);
+  procedure   List_os(xcodos, xcodpac: string; salida: char);
+  procedure   List_Tit(salida: char);
+  procedure   Enccol;
+end;
+
+function paciente: TTPaciente;
+
+implementation
+
+var
+  xpaciente: TTPaciente = nil;
+
+constructor TTPaciente.Create;
+begin
+  inherited Create('', '', '', '', ''); // Hereda de Persona
+  if dbs.BaseClientServ = 'N' then Begin
+    tperso   := datosdb.openDB('paciente', 'Codpac');
+    tabla2   := datosdb.openDB('pacienth', 'Codpac');
+    pacobsoc := datosdb.openDB('pacobsoc', 'Codpac;Codos');
+    pacfoto  := datosdb.openDB('pacientefoto', 'Codpac');
+  end;
+  if dbs.BaseClientServ = 'S' then Begin
+    tperso   := datosdb.openDB('paciente', 'Codpac', '', dbs.baseDat_N);
+    tabla2   := datosdb.openDB('pacienth', 'Codpac', '', dbs.baseDat_N);
+    pacobsoc := datosdb.openDB('pacobsoc', 'Codpac;Codos', '', dbs.baseDat_N);
+    pacfoto  := datosdb.openDB('pacientefoto', 'Codpac', '', dbs.baseDat_N);
+  end;
+
+  lista := TStringList.Create;
+end;
+
+destructor TTPaciente.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTPaciente.Buscar(xcodigo: string): boolean;
+// Objetivo...: Buscar una instancia
+begin
+  if not tperso.Active then Begin
+    tperso.Open;
+    Enccol;
+  end;
+  if not tabla2.Active then tabla2.Open;
+  if tperso.IndexFieldNames <> 'codpac' then tperso.IndexFieldNames := 'codpac';
+  if tabla2.FindKey([xcodigo]) then Begin
+    inherited Buscar(xcodigo);
+    Result := True;
+  end
+  else
+    Result := False;
+end;
+
+procedure TTPaciente.Grabar(xcodigo, xnombre, xdomicilio, xcp, xorden, xfenac, xtelefono, xsexo, xcompcel, xemail: string);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  //if tabla2.recordcount > 20 then utiles.msgError('El demo no admite mas de 20 pacientes') else begin
+  if Buscar(xcodigo) then tabla2.Edit else tabla2.Append;
+  tabla2.FieldByName('codpac').AsString   := xcodigo;
+  tabla2.FieldByName('fenac').AsString    := utiles.sExprFecha(xfenac);
+  tabla2.FieldByName('telefono').AsString := TrimLeft(xtelefono);
+  tabla2.FieldByName('sexo').AsString     := xsexo;
+  tabla2.FieldByName('compcel').AsString  := xcompcel;
+  tabla2.FieldByName('email').AsString    := xemail;
+  try
+    tabla2.Post
+  except
+    tabla2.Cancel
+  end;
+  inherited Grabar(xcodigo, xnombre, xdomicilio, '', '');
+  datosdb.refrescar(tperso); datosdb.refrescar(tabla2);
+end;
+
+procedure TTPaciente.Borrar(xcodigo: string);
+// Objetivo...: Eliminar una instancia
+begin
+  if Buscar(xcodigo) then
+    begin
+      inherited Borrar(xcodigo);
+      tabla2.Delete;
+      getDatos(tabla2.FieldByName('codpac').AsString);
+      datosdb.refrescar(tperso); datosdb.refrescar(tabla2);
+    end;
+end;
+
+procedure TTPaciente.getDatos(xcodigo: string);
+// Objetivo...: Cargar/iniciar los atributos para una instancia
+begin
+  if Buscar(xcodigo) then
+    begin
+      fenac    := utiles.sFormatoFecha(tabla2.FieldByName('fenac').AsString);
+      telefono := tabla2.FieldByName('telefono').AsString;
+      sexo     := tabla2.FieldByName('sexo').AsString;
+      compcel  := tabla2.FieldByName('compcel').AsString;
+      email    := tabla2.FieldByName('email').AsString;
+      utiles.calc_antiguedad(utiles.sExprFecha(fenac), utiles.sExprFecha2000(utiles.setFechaActual));
+      if (utiles.getAnios > 0) then edad := IntToStr(utiles.getAnios) else edad := '0';
+    end
+  else
+    begin
+      fenac := ''; telefono := ''; sexo := ''; compcel := ''; email := ''; edad := '';
+    end;
+  inherited getDatos(xcodigo);
+end;
+
+function TTPaciente.setPacientes: TQuery;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Result := datosdb.tranSQL('SELECT * FROM paciente');
+end;
+
+function TTPaciente.setPacientesAlf: TQuery;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Result := datosdb.tranSQL('SELECT * FROM paciente ORDER BY nombre');
+end;
+
+procedure TTPaciente.List_Tit(salida: char);
+// Objetivo...: Listar una Línea
+begin
+  if salida <> 'E' then Begin
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' Listado de Pacientes', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, utiles.espacios(espacios) + 'Cód.      Apellido y Nombre', 1, 'Arial, cursiva, 8');
+    List.Titulo(40, List.lineactual, 'Dirección', 2, 'Arial, cursiva, 8');
+    List.Titulo(80, List.lineactual, 'Teléfono', 4, 'Arial, cursiva, 8');
+    List.Titulo(94, List.lineactual, 'Edad', 5, 'Arial, cursiva, 8');
+    List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+  end else Begin
+    fila := 0;
+    Inc(fila); nf := IntToStr(fila);
+    excel.setString('A' + nf, 'A' + nf, 'Nómina de Pacientes', 'Arial, negrita, 12');
+    Inc(fila); nf := IntToStr(fila);
+    Inc(fila); nf := IntToStr(fila);
+    excel.setString('A' + nf, 'A' + nf, 'Código', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna('A' + nf, 'A' + nf, 6);
+    excel.setString('B' + nf, 'B' + nf, 'Nombre', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna('B' + nf, 'B' + nf, 40);
+    excel.setString('C' + nf, 'C' + nf, 'Dirección', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna('C' + nf, 'C' + nf, 40);
+    excel.setString('D' + nf, 'D' + nf, 'Teléfono', 'Arial, negrita, 8');
+    excel.FijarAnchoColumna('D' + nf, 'D' + nf, 30);
+    excel.FijarAnchoColumna('E' + nf, 'E' + nf, 9);
+    excel.Alinear('E' + nf, 'E' + nf, 'D');
+    excel.setString('E' + nf, 'E' + nf, 'F. Nac.', 'Arial, negrita, 8');
+  end;
+end;
+
+procedure TTPaciente.List_linea(salida: char);
+// Objetivo...: Listar una Línea
+var
+  anios: string;
+begin
+  anios := ''; Inc(cantidad);
+  tabla2.FindKey([tperso.FieldByName('codpac').AsString]);   // Sincronizamos las tablas
+  if Length(Trim(tabla2.FieldByName('fenac').AsString)) > 0 then Begin
+    utiles.calc_antiguedad(tabla2.FieldByName('fenac').AsString, utiles.sExprFecha2000(DateToStr(now)));
+    anios := IntToStr(utiles.getAnios);
+  end;
+  if salida <> 'E' then Begin
+    List.Linea(0, 0, utiles.espacios(espacios) + tperso.FieldByName('codpac').AsString + '  ' + tperso.FieldByName('nombre').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    List.Linea(40, List.lineactual, tperso.FieldByName('direccion').AsString, 2, 'Arial, normal, 8', salida, 'N');
+    List.Linea(80, List.lineactual, tabla2.FieldByName('telefono').AsString, 3, 'Arial, normal, 8', salida, 'N');
+    List.Linea(94, List.lineactual, anios, 4, 'Arial, normal, 8', salida, 'S');
+  end else Begin
+    Inc(fila); nf := IntToStr(fila);
+    excel.setString('A' + nf, 'A' + nf, '''' + tperso.FieldByName('codpac').AsString, 'Arial, normal, 8');
+    excel.setString('B' + nf, 'B' + nf, '''' + tperso.FieldByName('nombre').AsString, 'Arial, normal, 8');
+    excel.setString('C' + nf, 'C' + nf, '''' + tperso.FieldByName('direccion').AsString, 'Arial, normal, 8');
+    excel.setString('D' + nf, 'D' + nf, '''' + tabla2.FieldByName('telefono').AsString, 'Arial, normal, 8');
+    if Length(Trim(tabla2.FieldByName('fenac').AsString)) = 8 then excel.setString('E' + nf, 'E' + nf, '''' + utiles.sFormatoFecha(tabla2.FieldByName('fenac').AsString), 'Arial, normal, 8');
+  end;
+end;
+
+procedure TTPaciente.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listado de la clase
+begin
+  espacios := 0; cantidad := 0;
+  if orden = 'A' then tperso.IndexName := tperso.IndexDefs.Items[1].Name;
+  list.Setear(salida); 
+  list_Tit(salida);
+
+  tperso.First;
+  while not tperso.EOF do begin
+    // Ordenado por Código
+    if (ent_excl = 'E') and (orden = 'C') then
+      if (tperso.FieldByName('codpac').AsString >= iniciar) and (tperso.FieldByName('codpac').AsString <= finalizar) then List_linea(salida);
+    if (ent_excl = 'X') and (orden = 'C') then
+      if (tperso.FieldByName('codpac').AsString < iniciar) or (tperso.FieldByName('codpac').AsString > finalizar) then List_linea(salida);
+    // Ordenado Alfabéticamente
+    if (ent_excl = 'E') and (orden = 'A') then
+      if (tperso.FieldByName('nombre').AsString >= iniciar) and (tperso.FieldByName('nombre').AsString <= finalizar) then List_linea(salida);
+    if (ent_excl = 'X') and (orden = 'A') then
+      if (tperso.FieldByName('nombre').AsString < iniciar) or (tperso.FieldByName('nombre').AsString > finalizar) then List_linea(salida);
+
+    tperso.Next;
+  end;
+
+  if salida <> 'E' then Begin
+    List.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
+    List.Linea(0, 0, 'Cantidad de Pacientes Listados: ' + IntToStr(cantidad), 1, 'Arial, normal, 9', salida, 'S');
+  end;
+
+  if salida <> 'E' then List.FinList else Begin
+    excel.setString('A2', 'A2', '''', 'Arial, normal, 8');
+    excel.Visulizar;
+  end;
+
+  tperso.IndexFieldNames := tperso.IndexFieldNames;
+  tperso.First;
+end;
+
+function  TTPaciente.BuscarObsoc(xcodpac, xcodos: string): boolean;
+begin
+  if datosdb.Buscar(pacobsoc, 'codpac', 'codos', xcodpac, xcodos) then Result := True else Result := False;
+end;
+
+procedure TTPaciente.GrabarObsoc(xcodpac, xcodos: string);
+begin
+  if not BuscarObsoc(xcodpac, xcodos) then Begin
+    pacobsoc.Append;
+    pacobsoc.FieldByName('codpac').AsString := xcodpac;
+    pacobsoc.FieldByName('codos').AsString  := xcodos;
+    try
+      pacobsoc.Post
+    except
+      pacobsoc.Cancel
+    end;
+  end;
+  datosdb.refrescar(pacobsoc);
+end;
+
+procedure TTPaciente.BorrarObsoc(xcodpac, xcodos: string);
+begin
+  if BuscarObsoc(xcodpac, xcodos) then Begin
+    pacobsoc.Delete;
+    datosdb.refrescar(pacobsoc);
+  end;
+end;
+
+function TTPaciente.setObrasSociales(xcodpac: string): TQuery;
+begin
+  Result := datosdb.tranSQL('SELECT * FROM pacobsoc WHERE codpac = ' + '"' + xcodpac + '"');
+end;
+
+procedure TTPaciente.ListarPorObraSocial(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar por obras sociales
+var
+  r: TQuery;
+begin
+  espacios := 4;
+  r := datosdb.tranSQL('SELECT codos, codpac FROM pacobsoc ORDER BY codos, codpac');
+
+  list_Tit(salida);
+
+  r.Open; r.First;
+  while not r.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (r.FieldByName('codos').AsString >= iniciar) and (r.FieldByName('codos').AsString <= finalizar) then List_os(r.FieldByName('codos').AsString, r.FieldByName('codpac').AsString, salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (r.FieldByName('codos').AsString < iniciar) or (r.FieldByName('codos').AsString > finalizar) then List_os(r.FieldByName('codos').AsString, r.FieldByName('codpac').AsString, salida);
+
+      r.Next;
+    end;
+  r.Close; r.Free;
+  List.FinList;
+end;
+
+procedure TTPaciente.List_os(xcodos, xcodpac: string; salida: char);
+// Objetivo...: Listar una Línea
+begin
+  if xcodos <> codosanter then Begin
+    obsocial.getDatos(xcodos);
+    if Length(Trim(codosanter)) > 0 then List.Linea(0, 0, ' ', 1, 'Arial, negrita, 5', salida, 'S');
+    List.Linea(0, 0, obsocial.Nombre, 1, 'Arial, negrita, 11', salida, 'S');
+    List.Linea(0, 0, ' ', 1, 'Arial, negrita, 6', salida, 'S');
+  end;
+  paciente.getDatos(xcodpac);
+  List_Linea(salida);
+  codosanter := xcodos;
+end;
+
+function TTPaciente.verifObraSocial(xcodos: string): boolean;
+var
+  f: boolean;
+begin
+  Result := False;
+  f := pacobsoc.Active;
+  if not pacobsoc.Active then pacobsoc.Open;
+  pacobsoc.First;
+  while not pacobsoc.EOF do Begin
+    if pacobsoc.FieldByName('codos').AsString = xcodos then Begin
+      Result := True;
+      Break;
+    end;
+    pacobsoc.Next;
+  end;
+  pacobsoc.Active := f;
+end;
+
+procedure TTPaciente.BuscarPorCodigo(xexpr: string);
+// Objetivo...: buscar por código
+begin
+  tperso.IndexFieldNames := 'Codpac';
+  tperso.FindNearest([xexpr]);
+end;
+
+procedure TTPaciente.BuscarPorNombre(xexpr: string);
+// Objetivo...: buscar por nombre
+begin
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.FindNearest([xexpr]);
+end;
+
+procedure TTPaciente.vaciarBuffer;
+// Objetivo...: Vaciar el Buffer
+begin
+  datosdb.vaciarBuffer(tperso);
+  datosdb.vaciarBuffer(tabla2);
+end;
+
+procedure TTPaciente.RegistrarFoto(xcodpac, xfoto: String);
+// Objetivo...: Registrar Foto del Paciente
+Begin
+  if pacfoto.FindKey([xcodpac]) then pacfoto.Edit else pacfoto.Append;
+  pacfoto.FieldByName('codpac').AsString := xcodpac;
+  TGraphicField(pacfoto.FieldByName('foto')).LoadFromFile(xfoto);
+  try
+    pacfoto.Post
+   except
+    pacfoto.Cancel
+  end;
+  datosdb.refrescar(pacfoto);
+end;
+
+function TTPaciente.setFoto(xcodpac: String): TJpegImage;
+// Objetivo...: Registrar Foto del Paciente
+var
+  Jpeg:TJpegImage;
+  Corriente:TMemoryStream;
+Begin
+  if pacfoto.FindKey([xcodpac]) then Begin
+    {Creamos un TJpegImage y una TMemoryStream}
+    {Para uso temporal}
+    Jpeg:=TJpegImage.create;
+    Corriente:=TMemoryStream.create;
+    {Grabamos el campo binario a la stream}
+    {Save the binary field in the stream}
+
+    with pacfoto do begin
+      (FieldByName('Foto') as TBlobField).SaveToStream(Corriente);
+    end;
+
+    {Rebobinamos Ccorriente}
+    Corriente.Seek(0,soFromBeginning);
+    {Cargamos Corriente en el TJpegImage}
+    {Load the stream into the TJpegImage}
+    Jpeg.LoadFromStream(Corriente);
+    {y asignamos el TJPegImage al Image1 de la form}
+    //Image1.Picture.Assign(Jpeg);
+
+    Result := Jpeg;
+  end else
+    Result := Nil;
+end;
+
+procedure TTPaciente.BorrarFoto(xcodpac: String);
+// Objetivo...: Borrar Foto
+Begin
+  if pacfoto.FindKey([xcodpac]) then Begin
+    pacfoto.Delete;
+    datosdb.refrescar(pacfoto);
+  end;
+end;
+
+procedure TTPaciente.Enccol;
+// Objetivo...: Mostrar Nombre de Columnas
+Begin
+  tperso.FieldByName('codpac').DisplayLabel := 'Cód.'; tperso.FieldByName('nombre').DisplayLabel := 'Nombre del Paciente'; tperso.FieldByName('direccion').DisplayLabel := 'Dirección';
+  tperso.FieldByName('cp').Visible := False; tperso.FieldByName('orden').Visible := False;
+  if datosdb.verificarSiExisteCampo(tperso, 'grabadoiva') then tperso.FieldByName('gravadoiva').Visible := False;
+end;
+
+function TTPaciente.setLista: TStringList;
+Begin
+  if lista <> Nil then lista.Clear else lista := TStringList.Create;
+  tperso.IndexFieldNames := 'codpac';
+  tperso.First;
+  while not tperso.Eof do Begin
+    lista.Add(tperso.FieldByName('codpac').AsString);
+    tperso.Next;
+  end;
+  Result := lista;
+end;
+
+procedure TTPaciente.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tperso.Active then tperso.Open;
+    if not tabla2.Active then tabla2.Open;
+    if not pacobsoc.Active then pacobsoc.Open;
+    if not pacfoto.Active then pacfoto.Open;
+    Enccol;
+    obsocial.conectar;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTPaciente.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tperso);
+    datosdb.closeDB(tabla2);
+    datosdb.closeDB(pacobsoc);
+    datosdb.closeDB(pacfoto);
+    obsocial.desconectar;
+  end;
+end;
+
+{===============================================================================}
+
+function paciente: TTPaciente;
+begin
+  if xpaciente = nil then
+    xpaciente := TTPaciente.Create;
+  Result := xpaciente;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xpaciente.Free;
+
+end.

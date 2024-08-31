@@ -1,0 +1,481 @@
+unit CNomeclaCCB;
+
+interface
+
+uses SysUtils, CListar, DB, DBTables, CBDT, CUtiles, CIDBFM, Classes, Forms, Contnrs;
+
+type
+
+TTNomeclatura = class(TObject)
+  codigo, descrip, codfact, RIE, cftoma, quimica, CF: string; gastos, ub: real;
+  NoUtilizarLista: Boolean;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Grabar(xcodigo, xcodfact, xdescrip, xcftoma: string; xgastos, xub: real);
+  procedure   EstablecerRIE(xcodigo: string);
+  procedure   Borrar(xcodigo: string);
+  function    Buscar(xcodigo: string): boolean;
+  function    Nuevo: string;
+  procedure   getDatos(xcodigo: string);
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  function    setNomeclatura: TQuery;
+  function    setNomeclaturaAlf: TQuery;
+  function    setNomeclaturaRIE: TQuery;
+  procedure   BuscarPorCodigo(xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+  procedure   QuitarRIE(xcodigo: string);
+  procedure   FijarComoAnalisisQuimica;
+  procedure   FijarCodigoFacturacion;
+  function    setCodigoTresDigitos(xcodigo: String): String;
+
+  procedure   ExportarNomecladorXML;
+  procedure   ImportarNomecladorXML;
+
+  procedure   conectar; overload;
+  procedure   conectar(xdirectorio: String); overload;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: integer;
+  codanter: String; ExisteCod: Boolean;
+  texport: TTable;
+  l: TObjectList;
+  procedure   ListLinea(salida: char);
+  procedure   CargarLista;
+end;                                 
+
+function nomeclatura: TTNomeclatura;
+
+implementation
+
+//uses CIntegridadReferencial;
+
+var
+  xnomeclatura: TTNomeclatura = nil;
+
+constructor TTNomeclatura.Create;
+begin
+  inherited Create;
+
+  l := TObjectList.Create;
+
+  if dbs.BaseClientServ = 'S' then Begin
+    if (LowerCase(ExtractFileName(Application.ExeName)) <> 'shmsoftlabinter.exe') then tabla := datosdb.openDB('nomeclad', 'Codigo') else
+      tabla := datosdb.openDB('nomeclad', 'Codigo', '', dbs.TDB1.DatabaseName);
+  end
+    else tabla := datosdb.openDB('nomeclad', 'Codigo', '', dbs.BaseDat);
+end;
+
+destructor TTNomeclatura.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function TTNomeclatura.Buscar(xcodigo: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if not tabla.Active then tabla.Open;
+  if tabla.IndexFieldNames <> 'Codigo' then tabla.IndexFieldNames := 'Codigo';
+  if tabla.FindKey([xcodigo]) then ExisteCod := True else ExisteCod := False;
+  Result := ExisteCod;
+end;
+
+procedure TTNomeclatura.Grabar(xcodigo, xcodfact, xdescrip, xcftoma: string; xgastos, xub: real);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xcodigo) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('codigo').AsString  := xcodigo;
+  tabla.FieldByName('codfact').AsString := xcodfact;
+  tabla.FieldByName('descrip').AsString := xdescrip;
+  tabla.FieldByName('cftoma').AsString  := xcftoma;
+  tabla.FieldByName('gastos').AsFloat   := xgastos;
+  tabla.FieldByName('ub').AsFloat       := xub;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+  datosdb.refrescar(tabla);
+  CargarLista;
+end;
+
+procedure TTNomeclatura.EstablecerRIE(xcodigo: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xcodigo) then Begin
+    tabla.Edit;
+    tabla.FieldByName('RIE').AsString  := '*';
+    try
+      tabla.Post;
+     except
+      tabla.Cancel;
+    end;
+  end;
+  datosdb.refrescar(tabla);
+  CargarLista;
+  Buscar(xcodigo);
+end;
+
+procedure TTNomeclatura.Borrar(xcodigo: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xcodigo) then
+    begin
+{
+      if (verificarIntegridad.verificarDeterminacion(xcodigo)) then begin
+        tabla.Delete;
+        datosdb.refrescar(tabla);
+        CargarLista;
+        getDatos(tabla.FieldByName('codigo').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+      end else
+        utiles.msgError('El Código Seleccionado tiene Operaciones Asociadas. Baja Denegada ...!');
+        }
+    end;
+end;
+
+procedure  TTNomeclatura.getDatos(xcodigo: string);
+// Objetivo...: Retornar/Iniciar Atributos
+var
+  i: Integer;
+  objeto: TTNomeclatura;
+  found: boolean;
+begin
+  if l <> Nil then Begin
+    codigo := ''; descrip := ''; codfact := ''; cftoma := ''; gastos := 0; ub := 0; RIE := ''; quimica := ''; cf := '';
+    for i := 1 to l.Count do Begin
+      objeto := TTNomeclatura(l.Items[i-1]);
+      if objeto.codigo = xcodigo then Begin
+        codigo  := objeto.codigo;
+        descrip := objeto.descrip;
+        cftoma  := objeto.cftoma;
+        codfact := objeto.codfact;
+        RIE     := objeto.RIE;
+        gastos  := objeto.gastos;
+        ub      := objeto.ub;
+        quimica := objeto.quimica;
+        CF      := objeto.CF;
+        found   := true;
+        Break;
+      end;
+    end;
+  end;
+  if not (found) then begin  
+    ExisteCod := Buscar(xcodigo);
+    if ExisteCod then Begin
+      codigo  := tabla.FieldByName('codigo').AsString;
+      descrip := tabla.FieldByName('descrip').AsString;
+      cftoma  := tabla.FieldByName('cftoma').AsString;
+      codfact := tabla.FieldByName('codfact').AsString;
+      RIE     := tabla.FieldByName('RIE').AsString;
+      gastos  := tabla.FieldByName('gastos').AsFloat;
+      ub      := tabla.FieldByName('ub').AsFloat;
+      quimica := tabla.FieldByName('quimica').AsString;
+      CF      := tabla.FieldByName('cf').AsString;
+    end else Begin
+      codigo := ''; descrip := ''; codfact := ''; cftoma := ''; gastos := 0; ub := 0; RIE := ''; quimica := ''; cf := '';
+    end;
+    codanter := xcodigo;
+  end;
+end;
+
+function TTNomeclatura.Nuevo: string;
+// Objetivo...: Generar un Nuevo Atributo Código
+begin
+  tabla.Last;
+  if tabla.RecordCount > 0 then Result := IntToStr(tabla.FieldByName('codigo').AsInteger + 1) else Result := '1';
+end;
+
+procedure TTNomeclatura.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar Datos de Provincias
+begin
+  if orden = 'A' then tabla.IndexName := tabla.IndexDefs.Items[1].Name;
+
+  list.Setear(salida);
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado del Nomeclador Nacional Valorizado', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.' + utiles.espacios(3) +  'Descripción', 1, 'Arial, cursiva, 8');
+  List.Titulo(67, list.Lineactual, 'U.G.', 2, 'Arial, cursiva, 8');
+  List.Titulo(82, list.Lineactual, 'U.B.', 3, 'Arial, cursiva, 8');
+  List.Titulo(87, list.Lineactual, 'Cód.Fact.', 4, 'Arial, cursiva, 8');
+  List.Titulo(96, list.Lineactual, 'RIE', 5, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+
+  tabla.First;
+  while not tabla.EOF do Begin
+    // Ordenado por Código
+    if (ent_excl = 'E') and (orden = 'C') then
+      if (tabla.FieldByName('codigo').AsString >= iniciar) and (tabla.FieldByName('codigo').AsString <= finalizar) then ListLinea(salida);
+    if (ent_excl = 'X') and (orden = 'C') then
+      if (tabla.FieldByName('codigo').AsString < iniciar) or (tabla.FieldByName('codigo').AsString > finalizar) then ListLinea(salida);
+    // Ordenado Alfabéticamente
+    if (ent_excl = 'E') and (orden = 'A') then
+      if (tabla.FieldByName('descrip').AsString >= iniciar) and (tabla.FieldByName('descrip').AsString <= finalizar) then ListLinea(salida);
+    if (ent_excl = 'X') and (orden = 'A') then
+      if (tabla.FieldByName('descrip').AsString < iniciar) or (tabla.FieldByName('descrip').AsString > finalizar) then ListLinea(salida);
+
+    tabla.Next;
+  end;
+  List.FinList;
+
+  tabla.IndexFieldNames := tabla.IndexFieldNames;
+  tabla.First;
+end;
+
+procedure TTNomeclatura.ListLinea(salida: char);
+// Objetivo...: Linea de detalle
+begin
+  List.Linea(0, 0, tabla.FieldByName('codigo').AsString + '    ' + tabla.FieldByName('descrip').AsString, 1, 'Arial, normal, 8', salida, 'N');
+  List.importe(70, list.lineactual, '', tabla.FieldByName('gastos').AsFloat, 2, 'Arial, normal, 8');
+  List.importe(85, list.lineactual, '', tabla.FieldByName('ub').AsFloat, 3, 'Arial, normal, 8');
+  List.Linea(87, list.lineactual, tabla.FieldByName('codfact').AsString, 4, 'Courier New, normal, 9', salida, 'N');
+  List.Linea(97, list.lineactual, tabla.FieldByName('RIE').AsString, 5, 'Courier New, normal, 9', salida, 'S');
+end;
+
+function TTNomeclatura.setNomeclatura: TQuery;
+// Objetivo...: Devolver un set de registro con los items
+begin
+  Result := datosdb.tranSQL('SELECT * FROM nomeclad ORDER BY codigo');
+end;
+
+function TTNomeclatura.setNomeclaturaAlf: TQuery;
+// Objetivo...: Devolver un set de registro con los items
+begin
+  Result := datosdb.tranSQL('SELECT * FROM nomeclad order by descrip');
+end;
+
+function TTNomeclatura.setNomeclaturaRIE: TQuery;
+// Objetivo...: Devolver un set de registro con los items
+begin
+  Result := datosdb.tranSQL('SELECT * FROM nomeclad where RIE = ' + '''' + '*' + '''' + ' order by descrip');
+end;
+
+procedure TTNomeclatura.BuscarPorCodigo(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'Codigo';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTNomeclatura.BuscarPorNombre(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTNomeclatura.QuitarRIE(xcodigo: string);
+begin
+  if Buscar(xcodigo) then Begin
+    tabla.Edit;
+    tabla.FieldByName('RIE').AsString  := ' ';
+    tabla.FieldByName('UGRIE').AsFloat := 0;
+    tabla.FieldByName('UBRIE').AsFloat := 0;
+    try
+      tabla.Post
+    except
+      tabla.Cancel
+    end;
+  end;
+end;
+
+procedure TTNomeclatura.FijarComoAnalisisQuimica;
+// Objetivo...: marcar/desmarcar análisis de quimica  - Para calcular las hojas de trabajo
+begin
+  tabla.Edit;
+  if tabla.FieldByName('quimica').AsString = '*' then tabla.FieldByName('quimica').AsString := '' else tabla.FieldByName('quimica').AsString := '*';
+  try
+    tabla.Post
+  except
+    tabla.Cancel
+  end;
+end;
+
+procedure TTNomeclatura.FijarCodigoFacturacion;
+begin
+  tabla.Edit;
+  if tabla.FieldByName('cf').AsString = 'F' then tabla.FieldByName('cf').AsString := '' else  tabla.FieldByName('cf').AsString := 'F';
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+end;
+
+function  TTNomeclatura.setCodigoTresDigitos(xcodigo: String): String;
+// Objetivo...: Devolver aranceles
+Begin
+  Result := '';
+  tabla.First;
+  while not tabla.Eof do Begin
+    if Copy(tabla.FieldByName('codigo').AsString, 1, 3) = xcodigo then Begin
+      Result := tabla.FieldByName('codigo').AsString;
+      Break;
+    end;
+    tabla.Next;
+  end;
+end;
+
+procedure TTNomeclatura.ExportarNomecladorXML;
+// Objetivo...: Exportar Aranceles Obras Sociales
+Begin
+  texport := datosdb.openDB('nomeclad', '', '', dbs.DirSistema + '\actualizaciones_online\upload\estructu');
+  texport.Open;
+
+  list.ExportarInforme(dbs.DirSistema + '\actualizaciones_online\upload\nomeclador.xml');
+  list.LineaTxt('<?xml version="1.0"?>', True);
+  list.LineaTxt('', True);
+  list.LineaTxt('<nomeclador>', True);
+  tabla.First;
+  while not tabla.Eof do Begin
+    list.LineaTxt('  <nomeclatura>', True);
+    list.LineaTxt('  <codigo>' + tabla.FieldByName('codigo').AsString + '</codigo>', True);
+    if Length(Trim(tabla.FieldByName('descrip').AsString)) > 0 then list.LineaTxt('  <descrip>' + TrimLeft(tabla.FieldByName('descrip').AsString) + '</descrip>', True) else list.LineaTxt('  <descrip>null</descrip>', True);
+    list.LineaTxt('  <gastos>' + utiles.FormatearNumero(tabla.FieldByName('gastos').AsString) + '</gastos>', True);
+    list.LineaTxt('  <ub>' + utiles.FormatearNumero(tabla.FieldByName('ub').AsString) + '</ub>', True);
+    if Length(Trim(tabla.FieldByName('codfact').AsString)) > 0 then list.LineaTxt('  <codfact>' + tabla.FieldByName('codfact').AsString + '</codfact>', True) else list.LineaTxt('  <codfact>null</codfact>', True);
+    if Length(Trim(tabla.FieldByName('rie').AsString)) > 0 then list.LineaTxt('  <rie>' + tabla.FieldByName('rie').AsString + '</rie>', True) else list.LineaTxt('  <rie>null</rie>', True);
+    list.LineaTxt('  <ugrie>' + utiles.FormatearNumero(tabla.FieldByName('ugrie').AsString) + '</ugrie>', True);
+    list.LineaTxt('  <ubrie>' + utiles.FormatearNumero(tabla.FieldByName('ubrie').AsString) + '</ubrie>', True);
+    if Length(Trim(tabla.FieldByName('cftoma').AsString)) > 0 then list.LineaTxt('  <cftoma>' + tabla.FieldByName('cftoma').AsString + '</cftoma>', True) else list.LineaTxt('  <cftoma>null</cftoma>', True);
+    if Length(Trim(tabla.FieldByName('quimica').AsString)) > 0 then list.LineaTxt('  <quimica>' + tabla.FieldByName('quimica').AsString + '</quimica>', True) else list.LineaTxt('  <quimica>0</quimica>', True);
+    if Length(Trim(tabla.FieldByName('cf').AsString)) > 0 then list.LineaTxt('  <cf>' + tabla.FieldByName('cf').AsString + '</cf>', True) else list.LineaTxt('  <cf>null</cf>', True);
+    list.LineaTxt('  </nomeclatura>', True);
+
+    if texport.FindKey([tabla.FieldByName('codigo').AsString]) then texport.Edit else texport.Append;
+    texport.FieldByName('codigo').AsString  := tabla.FieldByName('codigo').AsString;
+    texport.FieldByName('descrip').AsString := tabla.FieldByName('descrip').AsString;
+    texport.FieldByName('gastos').AsString  := tabla.FieldByName('gastos').AsString;
+    texport.FieldByName('ub').AsString      := tabla.FieldByName('ub').AsString;
+    texport.FieldByName('rie').AsString     := tabla.FieldByName('rie').AsString;
+    texport.FieldByName('ugrie').AsString   := tabla.FieldByName('ugrie').AsString;
+    texport.FieldByName('ubrie').AsString   := tabla.FieldByName('ubrie').AsString;
+    texport.FieldByName('cftoma').AsString  := tabla.FieldByName('cftoma').AsString;
+    texport.FieldByName('quimica').AsString := tabla.FieldByName('quimica').AsString;
+    texport.FieldByName('cf').AsString := tabla.FieldByName('cf').AsString;
+    try
+      texport.Post
+     except
+      texport.Cancel
+    end;
+
+    tabla.Next;
+  end;
+  list.LineaTxt('</nomeclador>', True);
+  list.FinalizarExportacion;
+
+  datosdb.closeDB(texport);
+end;
+
+procedure TTNomeclatura.ImportarNomecladorXML;
+// Objetivo...: Actualizar Datos a partir de una Fuente XML
+Begin
+  texport := datosdb.openDB('nomeclad', '', '', dbs.DirSistema + '\actualizaciones_online\download\estructu');
+  texport.Open; texport.First;
+  while not texport.Eof do Begin
+    if Buscar(texport.FieldByName('codigo').AsString) then tabla.Edit else tabla.Append;
+    tabla.FieldByName('codigo').AsString  := texport.FieldByName('codigo').AsString;
+    tabla.FieldByName('descrip').AsString := texport.FieldByName('descrip').AsString;
+    tabla.FieldByName('gastos').AsString  := texport.FieldByName('gastos').AsString;
+    tabla.FieldByName('ub').AsString      := texport.FieldByName('ub').AsString;
+    tabla.FieldByName('codfact').AsString := texport.FieldByName('codfact').AsString;
+    tabla.FieldByName('rie').AsString     := texport.FieldByName('rie').AsString;
+    tabla.FieldByName('ugrie').AsString   := texport.FieldByName('ugrie').AsString;
+    tabla.FieldByName('ubrie').AsString   := texport.FieldByName('ubrie').AsString;
+    tabla.FieldByName('cftoma').AsString  := texport.FieldByName('cftoma').AsString;
+    tabla.FieldByName('quimica').AsString := texport.FieldByName('quimica').AsString;
+    tabla.FieldByName('cf').AsString      := texport.FieldByName('cf').AsString;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+    texport.Next;
+  end;
+
+  datosdb.closedb(texport);
+  datosdb.closedb(tabla); tabla.Open;
+end;
+
+procedure TTNomeclatura.CargarLista;
+var
+  objeto: TTNomeclatura;
+Begin
+  if not NoUtilizarLista then Begin
+    l.Clear;
+    tabla.First;
+    while not tabla.Eof do Begin
+      objeto               := TTNomeclatura.Create;
+      objeto.codigo        := tabla.FieldByName('codigo').AsString;
+      objeto.descrip       := tabla.FieldByName('descrip').AsString;
+      objeto.gastos        := tabla.FieldByName('gastos').AsFloat;
+      objeto.ub            := tabla.FieldByName('ub').AsFloat;
+      objeto.codfact       := tabla.FieldByName('codfact').AsString;
+      objeto.RIE           := tabla.FieldByName('rie').AsString;
+      objeto.cftoma        := tabla.FieldByName('cftoma').AsString;
+      objeto.quimica       := tabla.FieldByName('quimica').AsString;
+      objeto.CF            := tabla.FieldByName('cf').AsString;
+      l.Add(objeto);
+      tabla.Next;
+    end;
+  end;
+end;
+
+procedure TTNomeclatura.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('codigo').DisplayLabel := 'Cód.'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('descrip').DisplayWidth := 45; tabla.FieldByName('ub').DisplayLabel := 'U.B.'; tabla.FieldByName('codfact').DisplayLabel := 'Cód.Fact.'; tabla.FieldByName('quimica').DisplayLabel := '(*)';
+    tabla.FieldByName('ubrie').Visible := False; tabla.FieldByName('ugrie').Visible := False; tabla.FieldByName('rie').Visible := False;
+    tabla.FieldByName('gastos').DisplayLabel := 'U.G.'; tabla.FieldByName('cftoma').DisplayLabel := 'CFT';
+    CargarLista;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTNomeclatura.conectar(xdirectorio: String);
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    tabla := nil;
+    tabla := datosdb.openDB('nomeclad', 'Codigo', '', xdirectorio);
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('codigo').DisplayLabel := 'Cód.'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('descrip').DisplayWidth := 45; tabla.FieldByName('ub').DisplayLabel := 'U.B.'; tabla.FieldByName('codfact').DisplayLabel := 'Cód.Fact.'; tabla.FieldByName('quimica').DisplayLabel := '(*)';
+    tabla.FieldByName('ubrie').Visible := False; tabla.FieldByName('ugrie').Visible := False; tabla.FieldByName('rie').Visible := False;
+    tabla.FieldByName('gastos').DisplayLabel := 'U.G.'; tabla.FieldByName('cftoma').DisplayLabel := 'CFT';
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTNomeclatura.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if NoUtilizarLista then Begin
+    NoUtilizarLista := False;
+    CargarLista;
+  end;
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tabla);
+end;
+
+{===============================================================================}
+
+function nomeclatura: TTNomeclatura;
+begin
+  if xnomeclatura = nil then
+    xnomeclatura := TTNomeclatura.Create;
+  Result := xnomeclatura;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xnomeclatura.Free;
+
+end.

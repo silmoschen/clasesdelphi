@@ -1,0 +1,271 @@
+unit CPropitarios_CCSRural;
+
+interface
+
+uses CPersona, CBDT, SysUtils, DBTables, CUtiles, CListar, CIDBFM, Classes;
+
+type
+
+TTPropietario = class(TTPersona)
+  Telefono, Cuit, Nrodoc, Email, Tarifa, Medidor, Activo, CBU, Fijo: String;
+  tabla2: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  function    Buscar(xcodigo: String): Boolean;
+  procedure   Guardar(xcodigo, xnombre, xdomicilio, xtelefono, xcuit, xnrodoc, xemail, xtarifa, xmedidor, xactivo, xcbu, xfijo: string);
+  procedure   Borrar(xcodigo: string);
+  procedure   getDatos(xcodigo: string);
+  procedure   Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+  procedure   BuscarPorCodigo(xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+
+  function    setPropietarios: TQuery;
+  function    setListaPropietarios: TStringList;
+  function    setListaPropietariosActivos: TStringList;
+
+  function    getCantidadPropietariosGastosFijos: integer;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+  procedure   List_linea(salida: char);
+end;
+
+function propietario: TTPropietario;
+
+implementation
+
+var
+  xpropietario: TTPropietario = nil;
+
+constructor TTPropietario.Create;
+begin
+  inherited Create('', '', '', '', '');
+  tperso   := datosdb.openDB('propietarios', '');
+  tabla2   := datosdb.openDB('propietarioh', '');
+end;
+
+destructor TTPropietario.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function  TTPropietario.Buscar(xcodigo: string): boolean;
+// Objetivo...: Buscar una instancia
+begin
+  if tperso.IndexFieldNames <> 'Idpropiet' then tperso.IndexFieldNames := 'Idpropiet';
+  if tabla2.FindKey([xcodigo]) then Begin
+    inherited Buscar(xcodigo);
+    Result := True;
+  end else
+    Result := False;
+end;
+
+procedure TTPropietario.Guardar(xcodigo, xnombre, xdomicilio, xtelefono, xcuit, xnrodoc, xemail, xtarifa, xmedidor, xactivo, xcbu, xfijo: String);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  if Buscar(xcodigo) then tabla2.Edit else tabla2.Append;
+  tabla2.FieldByName('idpropiet').AsString := xcodigo;
+  tabla2.FieldByName('telefono').AsString  := xtelefono;
+  tabla2.FieldByName('nrocuit').AsString   := TrimLeft(xcuit);
+  tabla2.FieldByName('nrodoc').AsString    := TrimLeft(xnrodoc);
+  tabla2.FieldByName('email').AsString     := xemail;
+  tabla2.FieldByName('tarifa').AsString    := xtarifa;
+  tabla2.FieldByName('medidor').AsString   := xmedidor;
+  tabla2.FieldByName('activo').AsString    := xactivo;
+  tabla2.FieldByName('cbu').AsString       := xcbu;
+  tabla2.FieldByName('fijo').AsString      := xfijo;
+  try
+    tabla2.Post
+  except
+    tabla2.Cancel
+  end;
+  inherited Grabar(xcodigo, xnombre, xdomicilio, '', '');
+  datosdb.refrescar(tperso); datosdb.refrescar(tabla2);
+end;
+
+procedure TTPropietario.Borrar(xcodigo: string);
+// Objetivo...: Eliminar una instancia
+begin
+  if Buscar(xcodigo) then Begin
+    tabla2.Delete;
+    inherited Borrar(xcodigo);
+    getDatos(tabla2.FieldByName('idpropiet').AsString);
+  end;
+end;
+
+procedure TTPropietario.getDatos(xcodigo: string);
+// Objetivo...: Cargar/iniciar los atributos para una instancia
+begin
+  if Buscar(xcodigo) then Begin
+    cuit     := tabla2.FieldByName('nrocuit').AsString;
+    telefono := tabla2.FieldByName('telefono').AsString;
+    nrodoc   := tabla2.FieldByName('nrodoc').AsString;
+    email    := tabla2.FieldByName('email').AsString;
+    tarifa   := tabla2.FieldByName('tarifa').AsString;
+    medidor  := tabla2.FieldByName('medidor').AsString;
+    activo   := tabla2.FieldByName('activo').AsString;
+    cbu      := tabla2.FieldByName('cbu').AsString;
+    fijo     := tabla2.FieldByName('fijo').AsString;
+  end else Begin
+    cuit := ''; telefono := ''; email := ''; nrodoc := ''; activo := ''; cbu := ''; fijo := '';
+  end;
+  inherited getDatos(xcodigo);
+end;
+
+procedure TTPropietario.List_linea(salida: char);
+// Objetivo...: Listar una Línea
+var
+  anios: string;
+begin
+  anios := '';
+  tabla2.FindKey([tperso.FieldByName('idpropiet').AsString]);   // Sincronizamos las tablas
+  List.Linea(0, 0, tperso.FieldByName('idpropiet').AsString + '  ' + tperso.FieldByName('nombre').AsString, 1, 'Arial, normal, 8', salida, 'N');
+  List.Linea(40, List.lineactual, tperso.FieldByName('direccion').AsString, 2, 'Arial, normal, 8', salida, 'N');
+  List.Linea(60, List.lineactual, tabla2.FieldByName('telefono').AsString, 3, 'Arial, normal, 8', salida, 'N');
+  List.Linea(80, List.lineactual, tabla2.FieldByName('lote').AsString + '  ' + tabla2.FieldByName('manzana').AsString, 4, 'Arial, normal, 8', salida, 'S');
+  List.Linea(88, List.lineactual, tabla2.FieldByName('email').AsString, 5, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTPropietario.Listar(orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listado de la clase
+begin
+  if orden = 'A' then tperso.IndexFieldNames := 'Nombre';
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Listado de Propietarios Club de Campo Soc. Rural Reconquista', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Código  Apellido y Nombre', 1, 'Arial, cursiva, 8');
+  List.Titulo(40, List.lineactual, 'Dirección', 2, 'Arial, cursiva, 8');
+  List.Titulo(55, List.lineactual, 'Teléfono', 4, 'Arial, cursiva, 8');
+  List.Titulo(80, List.lineactual, 'Lote/Man.', 5, 'Arial, cursiva, 8');
+  List.Titulo(88, List.lineactual, 'Dirección de email', 6, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+  tperso.First;
+  while not tperso.EOF do Begin
+    // Ordenado por Código
+    if (ent_excl = 'E') and (orden = 'C') then
+      if (tperso.FieldByName('idpropiet').AsString >= iniciar) and (tperso.FieldByName('idpropiet').AsString <= finalizar) then List_linea(salida);
+    if (ent_excl = 'X') and (orden = 'C') then
+      if (tperso.FieldByName('idpropiet').AsString < iniciar) or (tperso.FieldByName('idpropiet').AsString > finalizar) then List_linea(salida);
+    // Ordenado Alfabéticamente
+    if (ent_excl = 'E') and (orden = 'A') then
+      if (tperso.FieldByName('nombre').AsString >= iniciar) and (tperso.FieldByName('nombre').AsString <= finalizar) then List_linea(salida);
+    if (ent_excl = 'X') and (orden = 'A') then
+      if (tperso.FieldByName('nombre').AsString < iniciar) or (tperso.FieldByName('nombre').AsString > finalizar) then List_linea(salida);
+    tperso.Next;
+  end;
+  List.FinList;
+
+  tperso.IndexFieldNames := tperso.IndexFieldNames;
+  tperso.First;
+end;
+
+procedure TTPropietario.BuscarPorCodigo(xexpr: string);
+// Objetivo...: buscar por código
+begin
+  tperso.IndexFieldNames := 'idpropiet';
+  tperso.FindNearest([xexpr]);
+end;
+
+procedure TTPropietario.BuscarPorNombre(xexpr: string);
+// Objetivo...: buscar por nombre
+begin
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.FindNearest([xexpr]);
+end;
+
+function  TTPropietario.setPropietarios: TQuery;
+// Objetivo...: Devolver propietarios
+Begin
+  Result := datosdb.tranSQL('SELECT * FROM ' + tperso.TableName + ' ORDER BY Nombre');
+end;
+
+function  TTPropietario.setListaPropietarios: TStringList;
+// Objetivo...: Armar una lista de propietarios
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.First;
+  while not tperso.Eof do Begin
+    if tperso.FieldByName('idpropiet').AsString > '0000' then l.Add(tperso.FieldByName('idpropiet').AsString);
+    tperso.Next;
+  end;
+  tperso.IndexFieldNames := 'Idpropiet';
+  Result := l;
+end;
+
+function  TTPropietario.setListaPropietariosActivos: TStringList;
+// Objetivo...: Armar una lista de propietarios Activos
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  tperso.IndexFieldNames := 'Nombre';
+  tperso.First;
+  while not tperso.Eof do Begin
+    if tperso.FieldByName('idpropiet').AsString > '0000' then
+      if tabla2.FindKey([tperso.FieldByName('idpropiet').AsString]) then
+        if tabla2.FieldByName('activo').AsString = 'S' then l.Add(tperso.FieldByName('idpropiet').AsString);
+    tperso.Next;
+  end;
+  tperso.IndexFieldNames := 'Idpropiet';
+  Result := l;
+end;
+
+function TTPropietario.getCantidadPropietariosGastosFijos: integer;
+var
+  r: TQuery;
+begin
+  r := datosdb.tranSQL('select count (*) from ' + tabla2.TableName + ' where fijo = ' + '''' + 'S' + '''');
+  r.Open;
+  result := r.fields[0].asinteger;
+  r.close; r.free;
+end;
+
+procedure TTPropietario.conectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tperso.Active then tperso.Open;
+    tperso.FieldByName('idpropiet').DisplayLabel := 'Cód.'; tperso.FieldByName('nombre').DisplayLabel := 'Nombre del Propietario'; tperso.FieldByName('direccion').DisplayLabel := 'Dirección';
+    tperso.FieldByName('cp').Visible := False; tperso.FieldByName('orden').Visible := False;
+    if not tabla2.Active then tabla2.Open;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTPropietario.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tperso);
+    datosdb.closeDB(tabla2);
+  end;
+end;
+
+{===============================================================================}
+
+function propietario: TTPropietario;
+begin
+  if xpropietario = nil then
+    xpropietario := TTPropietario.Create;
+  Result := xpropietario;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xpropietario.Free;
+
+end.

@@ -1,0 +1,102 @@
+unit CEstadisticasLaboratorio;
+
+interface
+
+uses CEstInfoLab, CSolAnalisisFabrissin, SysUtils, DB, DBTables, CVias, CUtiles,
+     CListar, CBDT, CIDBFM, Classes;
+
+type
+
+TTEstadisticaLaboratorio= class(TTInformesEstadisticos)
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   ListEstAnalisisEfectuados(salida: char);
+  procedure   ListEstPacientesIngresados(salida: char);
+  procedure   ListPacientesObraSocial(listOS: TStringList; salida: char);
+  procedure   ListAnalisisEnviadosEntidades(listSel: TStringList; salida: char);
+  procedure   ListListadoPorOrdenes(xdfecha, xhfecha: string; salida: char);
+  procedure   ListPorObraSocial_Paciente(xdfecha, xhfecha, xcodos: string; salida: char);
+private
+  { Declaraciones Privadas }
+end;
+
+function estadisticalab: TTEstadisticaLaboratorio;
+
+implementation
+
+var
+  xestadistica: TTEstadisticaLaboratorio= nil;
+
+constructor TTEstadisticaLaboratorio.Create;
+begin
+  inherited Create;
+end;
+
+destructor TTEstadisticaLaboratorio.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTEstadisticaLaboratorio.ListEstAnalisisEfectuados(salida: char);
+// Objetivo...: Estadística de análisis efectuados
+begin
+  Q := solanalisis.setEstadisticaSolicitudes(fecha1, fecha2);
+  inherited ListEstAnalisisEfectuados(salida);
+end;
+
+procedure TTEstadisticaLaboratorio.ListEstPacientesIngresados(salida: char);
+// Objetivo...: Estadística de pacientes ingresados
+begin
+  Q := solanalisis.setEstadisticaSolicitudesPacientes(fecha1, fecha2);
+  inherited ListEstPacientesIngresados(salida);
+end;
+
+procedure TTEstadisticaLaboratorio.ListPacientesObraSocial(listOS: TStringList; salida: char);
+// Objetivo...: Estadística de pacientes por obras sociales
+begin
+  Q := solanalisis.setEstadisticaObrasSociales(fecha1, fecha2);
+  inherited ListPacientesObraSocial(salida);
+end;
+
+procedure TTEstadisticaLaboratorio.ListAnalisisEnviadosEntidades(listSel: TStringList; salida: char);
+// Objetivo...: Análisis enviados a Entidades
+begin
+  Q := solanalisis.setEstadisticaAnalisisEnviados(fecha1, fecha2);
+  inherited ListAnalisisEnviadosEntidades(listSel, salida);
+end;
+
+procedure TTEstadisticaLaboratorio.ListListadoPorOrdenes(xdfecha, xhfecha: string; salida: char);
+// Objetivo...: Ordenes recibidas y no recibidas
+begin
+  Q := solanalisis.setOrdenesAnalisis(xdfecha, xhfecha);
+  inherited ListListadoPorOrdenes(salida);
+end;
+
+procedure TTEstadisticaLaboratorio.ListPorObraSocial_Paciente(xdfecha, xhfecha, xcodos: string; salida: char);
+// Objetivo...: Solicitudes por paciente y obra social
+begin
+  Q := solanalisis.setObrasSociales_Pacientes(xdfecha, xhfecha);
+  if (salida = 'P') or (salida = 'I') then inherited ListPorObraSocial_Paciente(xdfecha, xhfecha, xcodos, salida);
+end;
+
+
+{===============================================================================}
+
+function estadisticalab: TTEstadisticaLaboratorio;
+begin
+  if xestadistica = nil then
+    xestadistica := TTEstadisticaLaboratorio.Create;
+  Result := xestadistica;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xestadistica.Free;
+
+end.

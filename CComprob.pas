@@ -1,0 +1,142 @@
+unit CComprob;
+
+interface
+
+uses SysUtils, DB, DBTables, CBDT, CIDBFM, cutiles;
+
+type
+
+TTComprob = class(TObject)            // Superclase
+  idcompr, Descrip: string;
+  excluirIVA: boolean;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Grabar(xidcompr, xDescrip: string; excluiriva: boolean); overload;
+  procedure   Borrar(xidcompr: string); overload;
+  function    Buscar(xidcompr: string): boolean; overload;
+  procedure   getDatos(xidcompr: string); overload;
+  procedure   BuscarPorId(xexpr: string);
+  procedure   BuscarPorNombre(xexpr: string);
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  conexiones: shortint;
+  { Declaraciones Privadas }
+end;
+
+function comprobante: TTComprob;
+
+implementation
+
+var
+  xcomprob: TTComprob = nil;
+
+constructor TTComprob.Create;
+begin
+  inherited Create;
+  tabla := datosdb.openDB('tcomprob', 'Idcompr');
+end;
+
+destructor TTComprob.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTComprob.Grabar(xidcompr, xdescrip: string; excluiriva: boolean);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xidcompr) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('idcompr').AsString := xidcompr;
+  tabla.FieldByName('descrip').AsString := xdescrip;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+end;
+
+procedure TTComprob.Borrar(xidcompr: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xidcompr) then
+    begin
+      tabla.Delete;
+      getDatos(tabla.FieldByName('idcompr').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+    end;
+end;
+
+function TTComprob.Buscar(xidcompr: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if tabla.IndexFieldNames <> 'idcompr' then tabla.IndexFieldNames := 'idcompr';
+  if tabla.FindKey([xidcompr]) then Result := True else Result := False;
+end;
+
+procedure  TTComprob.getDatos(xidcompr: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  tabla.Refresh;
+  if Buscar(xidcompr) then
+    begin
+      idcompr  := tabla.FieldByName('idcompr').AsString;
+      descrip  := tabla.FieldByName('descrip').AsString;
+    end
+   else
+    begin
+      idcompr := ''; descrip := '';
+    end;
+end;
+
+procedure TTComprob.BuscarPorId(xexpr: string);
+// Objetivo...: buscar por id del comprobante
+begin
+  tabla.IndexFieldNames := 'idcompr';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTComprob.BuscarPorNombre(xexpr: string);
+// Objetivo...: Buscar por la descripción del comprobante
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTComprob.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('idcompr').DisplayLabel := 'Id.Com.'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción';
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTComprob.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tabla);
+end;
+
+{===============================================================================}
+
+function comprobante: TTComprob;
+begin
+  if xcomprob = nil then
+    xcomprob := TTComprob.Create;
+  Result := xcomprob;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xcomprob.Free;
+
+end.

@@ -1,0 +1,237 @@
+unit CTitulosFabrissin;
+
+interface
+
+uses SysUtils, DBTables, CBDT, CUtiles, CIDBFM;
+
+type
+
+TTitulos = class(TObject)
+  titulo, subtitulo, profesional, actividad, direccion, fTitulo, fSubtitulo, fProfesional, fprofesion, fdirtel: string; gastos, ub: real; lineas: shortint;
+  titsobre, ftitsobre, subtsobre, fsubtsobre, actsobre, factsobre, margenSup, margenInf, base_datos: String;
+  tabla, tpac: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Grabar(xtitulo, xsubtitulo, xprofesional, xactividad, xdireccion, xftitulo, xfsubtitulo, xfprofesional, xfprofesion, xfdirtel, xmargensup, xmargeninf: string);
+  procedure   FijarNroLienasEnBlanco(xlineas: shortint);
+  procedure   getDatos;
+
+  procedure   GrabarFormatoSobres(xtitulo, xsubtitulo, xactividad, xftitulo, xsubftitulo, xfactividad: String);
+  procedure   getDatosSobre;
+
+  procedure   GrabarFormatoPaciente(xdefinicion: String);
+  procedure   BorrarFormatoPaciente;
+  function    getFormatoPaciente: String;
+  function    verificarDefinicionFormatoPaciente: Boolean;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  { Declaraciones Privadas }
+  archivo: TextFile;
+end;
+
+function titulos: TTitulos;
+
+implementation
+
+var
+  xtitulos: TTitulos = nil;
+
+constructor TTitulos.Create;
+begin
+  inherited Create;
+  if dbs.BaseClientServ = 'N' then Begin
+    tabla := datosdb.openDB('titinf', '');
+    tpac  := datosdb.openDB('titulospac', '');
+  end;
+  if dbs.BaseClientServ = 'S' then Begin
+    tabla := datosdb.openDB('titinf', '', '', dbs.baseDat_N);
+    tpac  := datosdb.openDB('titulospac', '', '', dbs.baseDat_N);
+  end;
+  ftitsobre  := 'Arial, normal, 9';
+  fsubtsobre := 'Arial, normal, 9';
+  factsobre  := 'Arial, normal, 9';
+end;
+
+destructor TTitulos.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTitulos.Grabar(xtitulo, xsubtitulo, xprofesional, xactividad, xdireccion, xftitulo, xfsubtitulo, xfprofesional, xfprofesion, xfdirtel, xmargensup, xmargeninf: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if tabla.RecordCount > 0 then tabla.Edit else tabla.Append;
+  tabla.FieldByName('titulo').AsString      := xtitulo;
+  tabla.FieldByName('subtitulo').AsString   := xsubtitulo;
+  tabla.FieldByName('profesional').AsString := xprofesional;
+  tabla.FieldByName('actividad').AsString   := xactividad;
+  tabla.FieldByName('direccion').AsString   := xdireccion;
+  tabla.FieldByName('ftitulo').AsString     := xftitulo;
+  tabla.FieldByName('fsubtitulo').AsString  := xfsubtitulo;
+  tabla.FieldByName('fprofesional').AsString:= xfprofesional;
+  tabla.FieldByName('fprofesion').AsString  := xfprofesion;
+  tabla.FieldByName('fdirtel').AsString     := xfdirtel;
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+  AssignFile(archivo, dbs.DirSistema + '\titprot.ini');
+  Rewrite(archivo);
+  WriteLn(archivo, xmargensup);
+  WriteLn(archivo, xmargeninf);
+  closeFile(archivo);
+  getDatos;
+end;
+
+procedure TTitulos.FijarNroLienasEnBlanco(xlineas: shortint);
+// Objetivo...: Fijar el nro. de lineas
+begin
+  if tabla.RecordCount > 0 then tabla.Edit else tabla.Append;
+  tabla.FieldByName('lineas').AsInteger := xlineas;
+  try
+    tabla.Post
+  except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure  TTitulos.getDatos;
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  if tabla.RecordCount > 0 then
+    begin
+      titulo      := tabla.FieldByName('titulo').AsString;
+      subtitulo   := tabla.FieldByName('subtitulo').AsString;
+      profesional := tabla.FieldByName('profesional').AsString;
+      actividad   := tabla.FieldByName('actividad').AsString;
+      direccion   := tabla.FieldByName('direccion').AsString;
+      ftitulo     := tabla.FieldByName('ftitulo').AsString;
+      fprofesional:= tabla.FieldByName('fprofesional').AsString;
+      fsubtitulo  := tabla.FieldByName('fsubtitulo').AsString;
+      lineas      := tabla.FieldByName('lineas').AsInteger;
+      fprofesion  := tabla.FieldByName('fprofesion').AsString;
+      fdirtel     := tabla.FieldByName('fdirtel').AsString;
+    end
+   else
+    begin
+      titulo := ''; profesional := ''; actividad := ''; direccion := ''; subtitulo := ''; ftitulo := ''; fprofesional := ''; fsubtitulo := ''; lineas := 0; fprofesion := ''; fdirtel := '';
+    end;
+  if FileExists(dbs.DirSistema + '\titprot.ini') then Begin
+    AssignFile(archivo, dbs.DirSistema + '\titprot.ini');
+    Reset(archivo);
+    ReadLn(archivo, margensup);
+    ReadLn(archivo, margeninf);
+    closeFile(archivo);
+  end else Begin
+    margensup := '0';
+    margeninf := '0';
+  end;
+end;
+
+procedure TTitulos.GrabarFormatoSobres(xtitulo, xsubtitulo, xactividad, xftitulo, xsubftitulo, xfactividad: String);
+Begin
+  if tabla.RecordCount > 0 then tabla.Edit else tabla.Append;
+  tabla.FieldByName('titsobre').AsString    := xtitulo;
+  tabla.FieldByName('subtsobre').AsString   := xsubtitulo;
+  tabla.FieldByName('actsobre').AsString    := xactividad;
+  tabla.FieldByName('ftitsobre').AsString   := xftitulo;
+  tabla.FieldByName('fsubtsobre').AsString  := xsubftitulo;
+  tabla.FieldByName('factsobre').AsString   := xfactividad;
+  try
+    tabla.Post
+   except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTitulos.getDatosSobre;
+Begin
+  if tabla.RecordCount > 0 then Begin
+    titsobre   := tabla.FieldByName('titsobre').AsString;
+    ftitsobre  := tabla.FieldByName('ftitsobre').AsString;
+    subtsobre  := tabla.FieldByName('subtsobre').AsString;
+    fsubtsobre := tabla.FieldByName('fsubtsobre').AsString;
+    actsobre   := tabla.FieldByName('actsobre').AsString;
+    factsobre  := tabla.FieldByName('factsobre').AsString;
+  end;
+end;
+
+procedure TTitulos.GrabarFormatoPaciente(xdefinicion: String);
+// Objetivo...: Guardar instancia
+begin
+  if tpac.FindKey(['01']) then tpac.Edit else tpac.Append;
+  tpac.FieldByName('id').AsString         := '01';
+  tpac.FieldByName('definicion').AsString := xdefinicion;
+  try
+    tpac.Post
+   except
+    tpac.Cancel
+  end;
+  datosdb.closeDB(tpac); tpac.Open;
+end;
+
+procedure TTitulos.BorrarFormatoPaciente;
+// Objetivo...: Borrar instancia
+begin
+  if tpac.FindKey(['01']) then tpac.Delete;
+  datosdb.closeDB(tpac); tpac.Open;
+end;
+
+function  TTitulos.getFormatoPaciente: String;
+// Objetivo...: Recuperar instancia
+begin
+  if tpac.FindKey(['01']) then Result := tpac.FieldByName('definicion').AsString else Result := '';
+end;
+
+function  TTitulos.verificarDefinicionFormatoPaciente: Boolean;
+// Objetivo...: Verificar Instancia
+begin
+  Result := tpac.FindKey(['01']);
+end;
+
+procedure TTitulos.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if Length(Trim(base_datos)) > 0 then Begin
+    tabla := Nil;
+    tabla := datosdb.openDB('titinf', '', '', base_datos);
+  end;
+  if not tabla.Active then tabla.Open;
+  if not tpac.Active then tpac.Open;
+  getDatos;
+end;
+
+procedure TTitulos.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  datosdb.closeDB(tabla);
+  datosdb.closeDB(tpac);
+  base_datos := '';
+end;
+
+{===============================================================================}
+
+function titulos: TTitulos;
+begin
+  if xtitulos = nil then
+    xtitulos := TTitulos.Create;
+  Result := xtitulos;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xtitulos.Free;
+
+end.

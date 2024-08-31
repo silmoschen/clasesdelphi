@@ -1,0 +1,340 @@
+unit CCModeloHTrabFabrissin;
+
+interface
+
+uses SysUtils, CListar, DB, DBTables, CBDT, CUtiles, CIDBFM, CTitulos;
+
+type
+
+TTHTrabajo = class(TObject)            // Superclase
+  idcat, descrip, codvariables: string;
+  rintermedios, lineasfinal: integer; distribucioncod, divisionesvert: string;
+  tabla, modhtrab, resulhtrab: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   Grabar(xidcat, xdescrip, xcodvariables: string);
+  procedure   Borrar(xidcat: String);
+  function    Buscar(xidcat: string): boolean;
+  procedure   getDatos(xidcat: string);
+  procedure   BuscarPorId(xexpr: string);
+  procedure   BuscarPorCategoria(xexpr: string);
+  function    setCategorias: TQuery;
+
+  function    BuscarItemsHTrabajo(xidcat, xid: string): boolean;
+  procedure   GuardarItemsHTrabajo(xidcat, xid, xit1, xit2, xit3, xit4, xit5, xit6, xit7, xit8, xit9, xit10, xit11, xit12, xit13: string);
+  function    setItemsHTrabajo(xidcat: String): TQuery;
+  procedure   FijarSeteos(xidcat: string; xrintermedios, xlineasfinal: integer; xdistribucioncod, xdivisionesvert: string);
+
+  function    BuscarResulHTrabajo(xidcat, xid: string): boolean;
+  procedure   IniciarResultados(salida: char);
+  procedure   GuardarResulHTrabajo(xidcat, xid, xit1, xit2, xit3, xit4, xit5, xit6, xit7, xit8, xit9, xit10, xit11, xit12, xit13: string);
+
+  procedure   ListarPlanillaDeTrabajo(xfecha: string; salida: char);
+  procedure   ImprimirHoja;
+
+  procedure   conectar;
+  procedure   desconectar;
+ private
+  conexiones: shortint;
+  { Declaraciones Privadas }
+end;
+
+function categoriasht: TTHTrabajo;
+
+implementation
+
+var
+  xcategoriasht: TTHTrabajo = nil;
+
+constructor TTHTrabajo.Create;
+begin
+  inherited Create;
+  if dbs.BaseClientServ = 'N' then Begin
+    tabla      := datosdb.openDB('cathtrab', 'Idcat');
+    modhtrab   := datosdb.openDB('modhtrab', 'Idcat;Id');
+    resulhtrab := datosdb.openDB('resulthtrab', 'Idcat;Id');
+  end;
+  if dbs.BaseClientServ = 'S' then Begin
+    tabla      := datosdb.openDB('cathtrab', 'Idcat', '', dbs.baseDat_N);
+    modhtrab   := datosdb.openDB('modhtrab', 'Idcat;Id', '', dbs.baseDat_N);
+    resulhtrab := datosdb.openDB('resulthtrab', 'Idcat;Id', '', dbs.baseDat_N);
+  end;
+end;
+
+destructor TTHTrabajo.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTHTrabajo.Grabar(xidcat, xdescrip, xcodvariables: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xidcat) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('idcat').AsString        := xidcat;
+  tabla.FieldByName('descrip').AsString      := xdescrip;
+  tabla.FieldByName('codvariables').AsString := xcodvariables;
+  try
+    tabla.Post
+  except
+    tabla.Cancel
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTHTrabajo.Borrar(xidcat: String);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xidcat) then Begin
+    tabla.Delete;
+    getDatos(tabla.FieldByName('idcat').Value);  // Fijamos los Atributos Siguientes al Objeto Borrado
+
+    // Borramos Items
+    datosdb.tranSQL('delete from ' + modhtrab.TableName + ' where idcat = ' + '''' + xidcat + '''');
+    datosdb.tranSQL('delete from ' + resulhtrab.TableName + ' where idcat = ' + '''' + xidcat + '''');
+    datosdb.refrescar(modhtrab);
+    datosdb.refrescar(resulhtrab);
+    datosdb.refrescar(tabla);
+  end;
+end;
+
+function TTHTrabajo.Buscar(xidcat: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if tabla.IndexFieldNames <> 'Idcat' then tabla.IndexFieldNames := 'Idcat';
+  if tabla.FindKey([xidcat]) then Result := True else Result := False;
+end;
+
+procedure  TTHTrabajo.getDatos(xidcat: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  if conexiones = 0 then conectar;
+  tabla.Refresh;
+  if Buscar(xidcat) then Begin
+    idcat           := tabla.FieldByName('idcat').AsString;
+    descrip         := tabla.FieldByName('descrip').AsString;
+    codvariables    := tabla.FieldByName('codvariables').AsString;
+    rintermedios    := tabla.FieldByName('rintermedios').AsInteger;
+    lineasfinal     := tabla.FieldByName('lineasfinal').AsInteger;
+    distribucioncod := tabla.FieldByName('distribucioncod').AsString;
+    divisionesvert  := tabla.FieldByName('divisionesvert').AsString;
+  end else begin
+    idcat := ''; descrip := ''; rintermedios := 0; lineasfinal := 0; distribucioncod := 'V'; codvariables := ''; divisionesvert := '';
+  end;
+end;
+
+procedure TTHTrabajo.BuscarPorId(xexpr: string);
+begin
+  if tabla.IndexFieldNames <> 'Idcat' then tabla.IndexFieldNames := 'Idcat';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTHTrabajo.BuscarPorCategoria(xexpr: string);
+begin
+  if tabla.IndexName <> 'IDescrip' then tabla.IndexName := 'IDescrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+function TTHTrabajo.setCategorias: TQuery;
+// Objetivo...: devolver un set de categorias
+begin
+  Result := datosdb.tranSQL(tabla .DatabaseName, 'SELECT * FROM cathtrab ORDER BY descrip');
+end;
+
+function TTHTrabajo.BuscarItemsHTrabajo(xidcat, xid: string): boolean;
+begin
+  Result := datosdb.Buscar(modhtrab, 'idcat', 'id', xidcat, xid);
+end;
+
+procedure TTHTrabajo.GuardarItemsHTrabajo(xidcat, xid, xit1, xit2, xit3, xit4, xit5, xit6, xit7, xit8, xit9, xit10, xit11, xit12, xit13: string);
+begin
+  if xid = '01' then begin
+    datosdb.tranSQL('DELETE FROM modhtrab WHERE idcat = ' + '"' + xidcat + '"');
+    datosdb.refrescar(modhtrab);
+  end;
+  if BuscarItemsHTrabajo(xidcat, xid) then modhtrab.Edit else modhtrab.Append;
+  modhtrab.FieldByName('idcat').AsString := xidcat;
+  modhtrab.FieldByName('id').AsString    := xid;
+  modhtrab.FieldByName('it1').AsString   := xit1;
+  modhtrab.FieldByName('it2').AsString   := xit2;
+  modhtrab.FieldByName('it3').AsString   := xit3;
+  modhtrab.FieldByName('it4').AsString   := xit4;
+  modhtrab.FieldByName('it5').AsString   := xit5;
+  modhtrab.FieldByName('it6').AsString   := xit6;
+  modhtrab.FieldByName('it7').AsString   := xit7;
+  modhtrab.FieldByName('it8').AsString   := xit8;
+  modhtrab.FieldByName('it9').AsString   := xit9;
+  modhtrab.FieldByName('it10').AsString  := xit10;
+  modhtrab.FieldByName('it11').AsString  := xit11;
+  modhtrab.FieldByName('it12').AsString  := xit12;
+  modhtrab.FieldByName('it13').AsString  := xit13;
+  try
+    modhtrab.Post
+  except
+    modhtrab.Cancel
+  end;
+  datosdb.refrescar(modhtrab);
+end;
+
+function TTHTrabajo.setItemsHTrabajo(xidcat: String): TQuery;
+// Objetivo...: retornar los items de la hoja de trabajo
+begin
+  Result := datosdb.tranSQL(modhtrab.DatabaseName, 'SELECT * FROM modhtrab WHERE idcat = ' + '"' + xidcat + '"');
+end;
+
+procedure TTHTrabajo.FijarSeteos(xidcat: string; xrintermedios, xlineasfinal: integer; xdistribucioncod, xdivisionesvert: string);
+// Objetivo...: Guardar los seteos de la plantilla
+begin
+  if Buscar(xidcat) then Begin
+    tabla.Edit;
+    tabla.FieldByName('rintermedios').AsInteger   := xrintermedios;
+    tabla.FieldByName('lineasfinal').AsInteger    := xlineasfinal;
+    tabla.FieldByName('distribucioncod').AsString := xdistribucioncod;
+    tabla.FieldByName('divisionesvert').AsString  := xdivisionesvert;
+    try
+      tabla.Post
+    except
+      tabla.Cancel
+    end;
+    datosdb.refrescar(tabla);
+  end;
+end;
+
+function TTHTrabajo.BuscarResulHTrabajo(xidcat, xid: string): boolean;
+begin
+  Result := datosdb.Buscar(resulhtrab, 'idcat', 'id', xidcat, xid);
+end;
+
+procedure TTHTrabajo.IniciarResultados(salida: char);
+begin
+  datosdb.tranSQL(resulhtrab.DataBaseName, 'DELETE FROM resulthtrab');
+  datosdb.closedb(resulhtrab); resulhtrab.Open;
+  list.Setear(salida);
+end;
+
+procedure TTHTrabajo.GuardarResulHTrabajo(xidcat, xid, xit1, xit2, xit3, xit4, xit5, xit6, xit7, xit8, xit9, xit10, xit11, xit12, xit13: string);
+begin
+  if BuscarResulHTrabajo(xidcat, xid) then resulhtrab.Edit else resulhtrab.Append;
+  resulhtrab.FieldByName('idcat').AsString := xidcat;
+  resulhtrab.FieldByName('id').AsString    := xid;
+  resulhtrab.FieldByName('it1').AsString   := xit1;
+  resulhtrab.FieldByName('it2').AsString   := xit2;
+  resulhtrab.FieldByName('it3').AsString   := xit3;
+  resulhtrab.FieldByName('it4').AsString   := xit4;
+  resulhtrab.FieldByName('it5').AsString   := xit5;
+  resulhtrab.FieldByName('it6').AsString   := xit6;
+  resulhtrab.FieldByName('it7').AsString   := xit7;
+  resulhtrab.FieldByName('it8').AsString   := xit8;
+  resulhtrab.FieldByName('it9').AsString   := xit9;
+  resulhtrab.FieldByName('it10').AsString  := xit10;
+  resulhtrab.FieldByName('it11').AsString  := xit11;
+  resulhtrab.FieldByName('it12').AsString  := xit12;
+  resulhtrab.FieldByName('it13').AsString  := xit13;
+  try
+    resulhtrab.Post
+  except
+    resulhtrab.Cancel
+  end;
+  datosdb.closedb(resulhtrab); resulhtrab.Open;
+end;
+
+procedure TTHTrabajo.ListarPlanillaDeTrabajo(xfecha: string; salida: char);
+// Objetivo...: Listar Planillas de Trabajo
+var
+  i, j: integer; idant: string;
+begin
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 18');
+  list.Titulo(0, 0, 'Planilla de Trabajo del día ' + xfecha, 1, 'Arial, negrita, 14');
+  list.Titulo(0, 0, ' ', 1, 'Arial, normal, 10');
+
+  resulhtrab.First; i := 0;
+  while not resulhtrab.EOF do Begin
+
+    if resulhtrab.FieldByName('idcat').AsString <> idant then Begin
+      if i > 0 then list.Linea(0, 0, ' ', 1, 'Arial, normal, 9', salida, 'S');
+      getDatos(resulhtrab.FieldByName('idcat').AsString);
+      list.Linea(0, 0, descrip, 1, 'Arial, negrita, 9', salida, 'S');
+      list.Linea(0, 0, ' ', 1, 'Arial, normal, 9', salida, 'S');
+      list.Linea(0, 0, list.Linealargopagina('--', salida), 1, 'Arial, normal, 11', salida, 'S');
+    end;
+
+    i := 0;
+
+    if divisionesvert <> 'S' then Begin
+      For j := 1 to 13 do Begin
+        if j = 1 then List.Linea(i, 0, resulhtrab.Fields[j+1].AsString, j, 'Arial, normal, 8', salida, 'N') else Begin
+          List.Linea(i, list.Lineactual, resulhtrab.Fields[j+1].AsString, j, 'Arial, normal, 8', salida, 'N');
+        end;
+
+        if j = 13 then list.Linea(0, 0, list.Linealargopagina('--', salida), 1, 'Arial, normal, 11', salida, 'S');
+        i := i + 7;
+      end;
+    end else Begin
+      For j := 1 to 13 do Begin
+        if j = 1 then List.Linea(i, 0, resulhtrab.Fields[j+1].AsString, j, 'Arial, normal, 8', salida, 'N') else Begin
+          List.Linea(i, list.Lineactual, '| ' + resulhtrab.Fields[j+1].AsString, j, 'Arial, normal, 8', salida, 'N');
+        end;
+
+        if j = 13 then list.Linea(0, 0, list.Linealargopagina('--', salida), 1, 'Arial, normal, 11', salida, 'S');
+        i := i + 7;
+      end;
+
+    end;
+
+    idant := resulhtrab.FieldByName('idcat').AsString;
+    resulhtrab.Next;
+  end;
+end;
+
+procedure TTHTrabajo.ImprimirHoja;
+// Objetivo...: listar Hoja
+begin
+  list.FinList;
+end;
+
+procedure TTHTrabajo.conectar;
+// Objetivo...: conectar tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('idcat').DisplayLabel := 'Id.'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción';
+    tabla.FieldByName('rintermedios').Visible := false; tabla.FieldByName('lineasfinal').Visible := false;
+    tabla.FieldByName('distribucioncod').Visible := false; tabla.FieldByName('codvariables').Visible := false;
+    tabla.FieldByName('divisionesvert').Visible := false;
+    if not modhtrab.Active then modhtrab.Open;
+    if not resulhtrab.Active then resulhtrab.Open;
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTHTrabajo.desconectar;
+// Objetivo...: desconectar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then Begin
+    datosdb.closeDB(tabla);
+    datosdb.closeDB(modhtrab);
+    datosdb.closeDB(resulhtrab);
+    datosdb.PackTParadox('resulthtrab');
+  end;
+end;
+
+{===============================================================================}
+
+function categoriasht: TTHTrabajo;
+begin
+  if xcategoriasht = nil then
+    xcategoriasht := TTHTrabajo.Create;
+  Result := xcategoriasht;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xcategoriasht.Free;
+
+end.

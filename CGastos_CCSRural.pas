@@ -1,0 +1,217 @@
+unit CGastos_CCSRural;
+
+interface
+
+uses SysUtils, CListar, DBTables, CBDT, CUtiles, CIDBFM;
+
+type
+
+TTGastos = class
+  Idgasto, Descrip, MFijo: string;
+  tabla: TTable;
+ public
+  { Declaraciones Públicas }
+  constructor Create;
+  destructor  Destroy; override;
+  procedure   Grabar(xidgasto, xDescrip: string); overload;
+  procedure   Grabar(xidgasto, xDescrip: string; xfijo: boolean); overload;
+  procedure   Borrar(xidgasto: string);
+  function    Buscar(xidgasto: string): boolean;
+  function    Nuevo: string;
+  procedure   getDatos(xidgasto: string);
+  procedure   BuscarPorDescrip(xexpr: string);
+  procedure   BuscarPorCodigo(xexpr: string);
+  function    getAll: TQuery;
+
+  procedure   conectar;
+  procedure   desconectar;
+  procedure   Listar(titulo, orden, iniciar, finalizar, ent_excl: string; salida: char);
+ protected
+  procedure   ListLinea(salida: char); virtual;
+  procedure   ListarTitulo(titulo: String; salida: char); virtual;
+ private
+  { Declaraciones Privadas }
+  conexiones: shortint;
+end;
+
+function gasto: TTGastos;
+
+implementation
+
+var
+  xgasto: TTGastos = nil;
+
+constructor TTGastos.Create;
+begin
+  inherited Create;
+end;
+
+destructor TTGastos.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTGastos.Grabar(xidgasto, xDescrip: string);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xidgasto) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('idgasto').Value := xidgasto;
+  tabla.FieldByName('Descrip').Value := xDescrip;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTGastos.Grabar(xidgasto, xDescrip: string; xfijo: boolean);
+// Objetivo...: Grabar Atributos del Objeto
+begin
+  if Buscar(xidgasto) then tabla.Edit else tabla.Append;
+  tabla.FieldByName('idgasto').Value := xidgasto;
+  tabla.FieldByName('Descrip').Value := xDescrip;
+  if (xfijo) then tabla.FieldByName('fijo').Value := 'S' else tabla.FieldByName('fijo').Value := 'N';
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+procedure TTGastos.Borrar(xidgasto: string);
+// Objetivo...: Eliminar un Objeto
+begin
+  if Buscar(xidgasto) then Begin
+    tabla.Delete;
+    getDatos(tabla.FieldByName('idgasto').AsString);  // Fijamos los Atributos Siguientes al Objeto Borrado
+  end;
+end;
+
+function TTGastos.Buscar(xidgasto: string): boolean;
+// Objetivo...: Buscar el Objeto solicitado
+begin
+  if not tabla.Active then conectar;
+  tabla.IndexFieldNames := 'idgasto';
+  if tabla.FindKey([xidgasto]) then Result := True else Result := False;
+end;
+
+procedure  TTGastos.getDatos(xidgasto: string);
+// Objetivo...: Retornar/Iniciar Atributos
+begin
+  if Buscar(xidgasto) then Begin
+    idgasto := tabla.FieldByName('idgasto').AsString;
+    Descrip := tabla.FieldByName('Descrip').AsString;
+    MFijo := tabla.FieldByName('fijo').AsString;
+  end else Begin
+    idgasto := ''; Descrip := ''; MFijo := 'N';
+  end;
+end;
+
+function TTGastos.Nuevo: string;
+// Objetivo...: Generar un Nuevo Atributo Código
+begin
+  tabla.Refresh;
+  tabla.IndexFieldNames := 'Idgasto';
+  tabla.Last;
+  if tabla.RecordCount > 0 then Result := IntToStr(tabla.FieldByName('idgasto').AsInteger + 1) else Result := '1';
+end;
+
+procedure TTGastos.Listar(titulo, orden, iniciar, finalizar, ent_excl: string; salida: char);
+// Objetivo...: Listar Datos de Descrips
+begin
+  if orden = 'A' then tabla.IndexFieldNames := 'Descrip';
+
+  ListarTitulo(titulo, salida);
+
+  tabla.First;
+  while not tabla.EOF do
+    begin
+      // Ordenado por Código
+      if (ent_excl = 'E') and (orden = 'C') then
+        if (tabla.FieldByName('idgasto').AsString >= iniciar) and (tabla.FieldByName('idgasto').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'C') then
+        if (tabla.FieldByName('idgasto').AsString < iniciar) or (tabla.FieldByName('idgasto').AsString > finalizar) then ListLinea(salida);
+      // Ordenado Alfabéticamente
+      if (ent_excl = 'E') and (orden = 'A') then
+        if (tabla.FieldByName('Descrip').AsString >= iniciar) and (tabla.FieldByName('Descrip').AsString <= finalizar) then ListLinea(salida);
+      if (ent_excl = 'X') and (orden = 'A') then
+        if (tabla.FieldByName('Descrip').AsString < iniciar) or (tabla.FieldByName('Descrip').AsString > finalizar) then ListLinea(salida);
+
+      tabla.Next;
+    end;
+    List.FinList;
+
+    tabla.IndexFieldNames := tabla.IndexFieldNames;
+    tabla.First;
+end;
+
+procedure TTGastos.ListLinea(salida: char);
+begin
+  List.Linea(0, 0, tabla.FieldByName('idgasto').AsString + '     ' + tabla.FieldByName('Descrip').AsString, 1, 'Courier New, normal, 9', salida, 'S');
+end;
+
+procedure TTGastos.ListarTitulo(titulo: String; salida: char);
+begin
+  list.Setear(salida);
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ' + titulo, 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+  List.Titulo(0, 0, 'Cód.' + utiles.espacios(3) +  'Descripción', 1, 'Courier New, cursiva, 9');
+  List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+  List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+end;
+
+procedure TTGastos.BuscarPorDescrip(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'Descrip';
+  tabla.FindNearest([xexpr]);
+end;
+
+procedure TTGastos.BuscarPorCodigo(xexpr: string);
+begin
+  tabla.IndexFieldNames := 'idgasto';
+  tabla.FindNearest([xexpr]);
+end;
+
+function TTGastos.getAll: TQuery;
+begin
+  result := datosdb.tranSQL('select * from ' + tabla.TableName + ' order by descrip');
+end;
+
+procedure TTGastos.conectar;
+// Objetivo...: Abrir tablas de persistencia
+begin
+  if conexiones = 0 then Begin
+    if not tabla.Active then tabla.Open;
+    tabla.FieldByName('idgasto').DisplayLabel := 'Cód.'; tabla.FieldByName('Descrip').DisplayLabel := 'Descripción';
+    tabla.FieldByName('fijo').DisplayLabel := 'G.Fijo';
+  end;
+  Inc(conexiones);
+end;
+
+procedure TTGastos.desconectar;
+// Objetivo...: cerrar tablas de persistencia
+begin
+  if conexiones > 0 then Dec(conexiones);
+  if conexiones = 0 then datosdb.closeDB(tabla);
+end;
+
+{===============================================================================}
+
+function gasto: TTGastos;
+begin
+  if xgasto = nil then
+    xgasto := TTGastos.Create;
+  Result := xgasto;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xgasto.Free;
+
+end.

@@ -1,0 +1,626 @@
+unit CEstInfoLab;
+
+interface
+
+uses CEstadisticas, CNomecla, CPaciente, CProfesional, CccteLab, CSolAnalisisFabrissin, Classes,
+     SysUtils, DB, DBTables, CVias, CUtiles, CListar, CBDT, CIDBFM, CObrasSociales, CDerivacionesAnalisis,
+     CNBU, CServers2000_Excel;
+
+type
+
+TTInformesEstadisticos = class(TTEstadistica)
+ public
+  { Declaraciones Públicas }
+  InfResumido, NoListarSolicitud: boolean;
+  constructor Create;
+  destructor  Destroy; override;
+
+  procedure   ListEstAnalisisEfectuados(salida: char);  { Análisis Efectuados }
+  procedure   ListEstPacientesIngresados(salida: char); { Análisis Efectuados }
+  procedure   ListPacientesObraSocial(salida: char);
+  procedure   ListAnalisisEnviadosEntidades(listSel: TStringList; salida: char);
+  procedure   ListListadoPorOrdenes(salida: char);
+  procedure   ListPorObraSocial_Paciente(xdfecha, xhfecha, xcodos: string; salida: char);
+private
+  { Declaraciones Privadas }
+  c1: integer;
+  descrip, l1: string; totos: Real;
+  procedure LineaResumen(xidos: string; importe: real; salida: char);
+  procedure list9984(salida: char);
+protected
+  { Declaraciones Protegidas }
+  procedure verifListado(salida: char);
+  procedure TotalAnalisis(salida: char; msg, xcod, xdes: string);
+end;
+
+function estadistsocios: TTInformesEstadisticos;
+
+implementation
+
+var
+  xestadistica: TTInformesEstadisticos = nil;
+
+constructor TTInformesEstadisticos.Create;
+begin
+  fecha1 := ''; fecha2 := ''; nroitems := 0;
+  inherited Create;
+end;
+
+destructor TTInformesEstadisticos.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TTInformesEstadisticos.verifListado(salida: char);
+// Objetivo...: Verificar emisión del Listado
+begin
+  if not s_inicio then Titulos('Informe Estadístico', salida);   // Si no se listo nada, tiramos los titulos
+end;
+
+procedure TTInformesEstadisticos.ListEstAnalisisEfectuados(salida: char);
+// Objetivo...: Listar los Analisis Efectuados en el lapso de tiempo dado
+var
+  cod, des: string;
+begin
+  verifListado(salida); c1 := 0;
+  if not InfResumido then Begin
+    if Not NoListarSolicitud then List.Titulo(0, 0, 'Fecha      Nº Sol  Protoclo', 1, 'Arial, cursiva, 8') else List.Titulo(0, 0, 'Fecha      Protoclo', 1, 'Arial, cursiva, 8');
+    List.Titulo(20, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
+    List.Titulo(65, list.Lineactual, 'Profesional', 3, 'Arial, cursiva, 8');
+    List.Titulo(0, 0, ' ', 1, 'Arial, cursiva, 5');
+  end;
+
+  if (salida = 'P') or (salida = 'I') then begin
+    List.Linea(0, 0, 'Análisis Efectuados', 1, 'Arial, negrita, 12', salida, 'S');
+    List.Linea(0, 0, ' ', 1, 'Arial, normal, 9', salida, 'S');
+  end;
+  if (salida = 'X') then begin
+    Inc(c1); l1 := Trim(IntToStr(c1));
+    excel.setString('a' + l1, 'a' + l1, 'Analisis Efectuados', 'Arial, negrita, 11');
+    excel.FijarAnchoColumna('b' + l1, 'b' + l1, 35);
+    Inc(c1);
+  end;
+
+  nomeclatura.conectar;
+  paciente.conectar;
+  profesional.conectar;
+  nbu.conectar;
+  Q.Open; Q.First; total := 0; idanter := '';
+  while not Q.EOF do
+    begin
+      if Q.FieldByName('codanalisis').AsString <> idanter then
+        begin
+          if Length(Trim(idanter)) > 0 then
+            begin
+              if not InfResumido then Begin
+                TotalAnalisis(salida, 'Total de Análisis Efectuados:', '', '');
+                List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+               end
+              else
+               TotalAnalisis(salida, descrip, cod, des);
+            end;
+          if (length(trim(Q.FieldByName('codanalisis').AsString)) = 4) then begin
+            nomeclatura.getDatos(Q.FieldByName('codanalisis').AsString);
+            if not InfResumido then Begin
+              List.Linea(0, 0, nomeclatura.codigo + '    ' + nomeclatura.descrip, 1, 'Arial, negrita, 9', salida, 'S');
+              List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+             end
+            else begin
+             descrip := '  ' + nomeclatura.codigo + '         ' + nomeclatura.descrip;
+             cod := '''' + nomeclatura.codigo; des := nomeclatura.descrip;
+            end;
+          end;
+        end;
+
+        if (length(trim(Q.FieldByName('codanalisis').AsString)) = 6) then begin
+          nbu.getDatos(Q.FieldByName('codanalisis').AsString);
+          if not InfResumido then Begin
+            List.Linea(0, 0, nbu.codigo + '    ' + nbu.descrip, 1, 'Arial, negrita, 9', salida, 'S');
+            List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+           end
+          else
+           descrip := '  ' + nbu.codigo + '    ' + nbu.descrip;
+           cod := '''' + nbu.codigo; des := nbu.descrip;
+        end;
+
+
+      if not InfResumido then Begin
+        paciente.getDatos(Q.FieldByName('codpac').AsString);
+        profesional.getDatos(Q.FieldByName('codprof').AsString);
+
+        if not NoListarSolicitud then List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('nrosolicitud').AsString + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N') else List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('nrosolicitud').AsString, 1, 'Arial, normal, 8', salida, 'N');
+        List.Linea(20, list.lineactual, paciente.nombre, 2, 'Arial, normal, 8', salida, 'N');
+        List.Linea(65, list.lineactual, profesional.nombres, 3, 'Arial, normal, 8', salida, 'S');
+      end;
+      total := total + 1;
+
+      idanter := Q.FieldByName('codanalisis').AsString;
+      items   := nomeclatura.codigo;
+      Q.Next;
+    end;
+
+    if not InfResumido then TotalAnalisis(salida, 'Total de Análisis Efectuados:', '', '') else TotalAnalisis(salida, descrip, cod, des);
+    List.Linea(0, 0, ' ', 1, 'Arial, normal, 8', salida, 'S');
+
+    Q.Close;
+    nomeclatura.desconectar;
+    paciente.desconectar;
+    profesional.desconectar;
+    nbu.desconectar;
+end;
+
+procedure TTInformesEstadisticos.ListEstPacientesIngresados(salida: char);
+// Objetivo...: Listar los pacientes ingresados en el lapso de tiempo dado
+begin
+  verifListado(salida);
+  if not InfResumido then Begin
+    if not NoListarSolicitud then List.Titulo(0, 0, 'Fecha      Nº Sol  Protoclo', 1, 'Arial, cursiva, 8') else List.Titulo(0, 0, 'Fecha      Protoclo', 1, 'Arial, cursiva, 8');
+    List.Titulo(20, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
+    List.Titulo(65, list.Lineactual, 'Profesional', 3, 'Arial, cursiva, 8');
+    List.Titulo(0, 0, ' ', 1, 'Arial, cursiva, 5');
+  end;
+
+  List.Linea(0, 0, 'Solicitudes Ingresadas', 1, 'Arial, negrita, 12', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 9', salida, 'S');
+
+  paciente.conectar;
+  profesional.conectar;
+  Q.Open; Q.First; total := 0; idanter := '';
+  while not Q.EOF do
+    begin
+      if Copy(Q.FieldByName('fecha').AsString, 5, 2) <> Copy(idanter, 5, 2) then
+        begin
+          if Length(Trim(idanter)) > 0 then
+            begin
+              if not InfResumido then Begin
+                TotalAnalisis(salida, 'Total de Solicitudes Ingresadas:', '', '');
+                List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+               end
+              else TotalAnalisis(salida, descrip, '', '');
+            end;
+          if not InfResumido then Begin
+            List.Linea(0, 0, meses[StrToInt(Copy(Q.FieldByName('fecha').AsString, 5, 2))], 1, 'Arial, negrita, 9', salida, 'S');
+            List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+           end
+          else
+           descrip := '  ' + meses[StrToInt(Copy(Q.FieldByName('fecha').AsString, 5, 2))];
+        end;
+
+      if not InfResumido then Begin
+        paciente.getDatos(Q.FieldByName('codpac').AsString);
+        profesional.getDatos(Q.FieldByName('codprof').AsString);
+
+        if not NoListarSolicitud then List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('nrosolicitud').AsString + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N') else List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N');
+        List.Linea(20, list.lineactual, paciente.nombre, 2, 'Arial, normal, 8', salida, 'N');
+        List.Linea(65, list.lineactual, profesional.nombres, 3, 'Arial, normal, 8', salida, 'S');
+      end;
+      total := total + 1;
+
+      idanter := Q.FieldByName('fecha').AsString;
+      items   := meses[StrToInt(Copy(Q.FieldByName('fecha').AsString, 5, 2))];
+      Q.Next;
+    end;
+
+    if InfResumido then TotalAnalisis(salida, descrip, '', '') else TotalAnalisis(salida, 'Total de Solicitudes Ingresadas:', '', '');
+    List.Linea(0, 0, ' ', 1, 'Courier New, normal, 8', salida, 'S');
+
+    Q.Close;
+    paciente.desconectar;
+    profesional.desconectar;
+end;
+
+procedure TTInformesEstadisticos.ListPacientesObraSocial(salida: char);
+// Objetivo...: Listar los pacientes ingresados en el lapso de tiempo dado por obra social
+var
+  imp, totos, totgral: real; totob: integer; t: TQuery;
+begin
+  verifListado(salida); totos := 0; totob := 0; totgral := 0;
+  if not NoListarSolicitud then List.Titulo(0, 0, 'Fecha      Nº Sol  Protoclo', 1, 'Arial, cursiva, 8') else List.Titulo(0, 0, 'Fecha      Protoclo', 1, 'Arial, cursiva, 8');
+  List.Titulo(20, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
+  List.Titulo(65, list.Lineactual, 'Profesional', 3, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, ' ', 1, 'Arial, cursiva, 5');
+
+  List.Linea(0, 0, 'Solicitudes Ingresadas por Obra Social', 1, 'Arial, negrita, 12', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 9', salida, 'S');
+
+  solanalisis.conectar;
+  obsocial.conectar;
+
+  Q.Open; Q.First; total := 0; idanter := ''; imp := 0;
+  while not Q.EOF do
+    begin
+      if Q.FieldByName('codos').AsString <> idanter then
+        begin
+          if Length(Trim(idanter)) > 0 then Begin
+            if not infresumido then Begin
+              List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+              List.derecha(98, list.Lineactual, '###################', '-------------------', 2, 'Arial, normal, 9');
+              List.Linea(0, 0, 'Total de Solicitudes Obra Social:', 1, 'Arial, normal, 9', salida, 'S');
+              List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+              List.importe(98, list.lineactual, '', totos, 3, 'Arial, negrita, 9');
+              List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+            end else Begin
+              obsocial.getDatos(idanter);
+              List.Linea(0, 0, obsocial.nombre, 1, 'Arial, negrita, 9', salida, 'S');
+              List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+              List.importe(98, list.lineactual, '', totos, 3, 'Arial, negrita, 9');
+              List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+            end;
+            DatosGrafico(total);
+            total := 0; totos := 0;
+          end;
+          if not InfResumido then Begin
+            obsocial.getDatos(Q.FieldByName('codos').AsString);
+            List.Linea(0, 0, obsocial.nombre, 1, 'Arial, negrita, 9', salida, 'S');
+            List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+          end;
+        end;
+
+      if not InfResumido then Begin
+        paciente.getDatos(Q.FieldByName('codpac').AsString);
+        profesional.getDatos(Q.FieldByName('codprof').AsString);
+        imp := solanalisis.setImportePacientePor_ObraSocial(Q.FieldByName('codpac').AsString, Q.FieldByName('codos').AsString, utiles.sFormatoFecha(fecha1), utiles.sFormatoFecha(fecha2)) + solanalisis.Total9984;
+        if not NoListarSolicitud then List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('nrosolicitud').AsString + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N') else List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N');
+        List.Linea(20, list.lineactual, paciente.nombre, 2, 'Arial, normal, 8', salida, 'N');
+        List.Linea(65, list.lineactual, profesional.nombres, 3, 'Arial, normal, 8', salida, 'N');
+        list.importe(98, list.lineactual, '', imp { cclab.getMontoSolicitud}, 4, 'Arial, normal, 8');
+        List.Linea(99, list.lineactual, '', 5, 'Arial, normal, 8', salida, 'S');
+      end;
+
+      Inc(totob);
+      total   := total + 1;
+      totos   := totos   + imp;
+      totgral := totgral + imp;
+
+      idanter := Q.FieldByName('codos').AsString;
+      items   := obsocial.nombre;
+      descrip := obsocial.nombre;
+      Q.Next;
+  end;
+
+  if not infresumido then
+   if total <> 0 then Begin
+    List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+    List.derecha(98, list.Lineactual, '###################', '-------------------', 2, 'Arial, normal, 9');
+    List.Linea(0, 0, 'Total de Solicitudes Obra Social:', 1, 'Arial, negrita, 9', salida, 'S');
+    List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+    List.importe(98, list.lineactual, '', totos, 3, 'Arial, negrita, 9');
+    List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+   end else
+    List.Linea(0, 0, 'No Existen datos para Listar', 1, 'Arial, cursiva, 8', salida, 'S');
+
+  if infresumido then Begin
+    obsocial.getDatos(idanter);
+    List.Linea(0, 0, obsocial.nombre, 1, 'Arial, negrita, 9', salida, 'S');
+    List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+    List.importe(98, list.lineactual, '', totos, 3, 'Arial, negrita, 9');
+    List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+  end;
+
+  if totos > 0 then Begin
+    List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+    List.derecha(98, list.Lineactual, '###################', '-------------------', 2, 'Arial, normal, 9');
+    List.Linea(0, 0, 'Total General de Solicitudes:', 1, 'Arial, negrita, 9', salida, 'S');
+    List.importe(60, list.lineactual, '#######', totob, 2, 'Arial, negrita, 9');
+    List.importe(98, list.lineactual, '', totgral, 3, 'Arial, negrita, 9');
+    List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+    DatosGrafico(total);
+    List.Linea(0, 0, ' ', 1, 'Courier New, normal, 8', salida, 'S');
+  end;
+
+  Q.Close;
+  solanalisis.desconectar;
+  obsocial.desconectar;
+end;
+
+procedure TTInformesEstadisticos.ListAnalisisEnviadosEntidades(listSel: TStringList; salida: char);
+// Objetivo...: Análisis enviados a Entidades
+var
+  totderiv: Integer;
+  importe: Real;
+begin
+  verifListado(salida);
+  if not InfResumido then Begin
+  if not NoListarSolicitud then List.Titulo(0, 0, 'Fecha      Nº Sol  Protoclo', 1, 'Arial, cursiva, 8') else List.Titulo(0, 0, 'Fecha      Protoclo', 1, 'Arial, cursiva, 8');
+    List.Titulo(15, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
+    List.Titulo(50, list.Lineactual, 'Determinación', 3, 'Arial, cursiva, 8');
+    List.Titulo(90, list.Lineactual, 'Monto', 4, 'Arial, cursiva, 8');
+  end else Begin
+    List.Titulo(0, 0, 'Entidad', 1, 'Arial, cursiva, 8');
+    List.Titulo(59, list.Lineactual, 'Cantidad', 2, 'Arial, cursiva, 8');
+  end;
+  List.Titulo(0, 0, ' ', 1, 'Arial, cursiva, 5');
+
+  List.Linea(0, 0, 'Análisis Derivados a otras Entidades', 1, 'Arial, negrita, 12', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 9', salida, 'S');
+  paciente.conectar;
+  nomeclatura.conectar;
+  derivanalisis.conectar;
+  Q.Open; Q.First; total := 0; idanter := ''; totderiv := 0; totales[2] := 0;
+  while not Q.EOF do begin
+    if utiles.verificarItemsLista(listSel, Q.FieldByName('identidad').AsString) then Begin
+      if Q.FieldByName('identidad').AsString <> idanter then begin
+        if Length(Trim(idanter)) > 0 then Begin
+          if Not InfResumido then Begin
+            List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+            List.Linea(0, 0, 'Total de Análisis Derivados: ', 1, 'Arial, normal, 9', salida, 'S');
+            List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+            List.importe(95, list.lineactual, '', totales[1], 3, 'Arial, negrita, 9');
+            List.Linea(0, 0, '    ', 1, 'Arial, negrita, 8', salida, 'S');
+          end else Begin
+            derivanalisis.getDatos(idanter);
+            List.Linea(0, 0, derivanalisis.Descrip, 1, 'Arial, normal, 9', salida, 'S');
+            List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+            List.importe(95, list.lineactual, '', totales[1], 3, 'Arial, negrita, 9');
+            List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+          end;
+
+          DatosGrafico(total);
+          total := 0; totales[1] := 0;
+        end;
+        if not Infresumido then Begin
+          derivanalisis.getDatos(Q.FieldByName('identidad').AsString);
+          List.Linea(0, 0, derivanalisis.Descrip, 1, 'Arial, negrita, 9', salida, 'S');
+          List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+        end;
+      end;
+
+      if not InfResumido then Begin
+        paciente.getDatos(Q.FieldByName('codpac').AsString);
+        nomeclatura.getDatos(Q.FieldByName('codanalisis').AsString);
+         if not NoListarSolicitud then List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('nrosolicitud').AsString + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N') else List.Linea(0, 0, utiles.sFormatoFecha(Q.FieldByName('fecha').AsString) + '  ' + Q.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N');
+        List.Linea(15, list.lineactual, Copy(paciente.nombre, 1, 30), 2, 'Arial, normal, 8', salida, 'N');
+        List.Linea(50, list.lineactual, nomeclatura.codigo + '  ' + Copy(nomeclatura.descrip, 1, 30), 3, 'Arial, normal, 8', salida, 'N');
+        importe := solanalisis.setValorAnalisis(Q.FieldByName('codos').AsString, Q.FieldByName('codanalisis').AsString, Copy(Q.FieldByName('fecha').AsString, 5, 2) + '/' + Copy(Q.FieldByName('fecha').AsString, 1, 4));
+        list.importe(95, list.Lineactual, '', importe, 4, 'Arial, normal, 8');
+        List.Linea(95, list.lineactual, '', 5, 'Arial, normal, 8', salida, 'S');
+      end;
+
+      total := total + 1;
+      totales[1] := totales[1] + importe;
+      totales[2] := totales[2] + importe;
+      Inc(totderiv);
+
+      idanter := Q.FieldByName('identidad').AsString;
+      items   := derivanalisis.descrip;
+      descrip := derivanalisis.descrip;
+    end;
+    Q.Next;
+  end;
+
+  if Not InfResumido then Begin
+    List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+    List.Linea(0, 0, 'Total de Análisis Derivados: ', 1, 'Arial, normal, 9', salida, 'S');
+    List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+    List.importe(95, list.lineactual, '', totales[1], 3, 'Arial, negrita, 9');
+    List.Linea(0, 0, '    ', 1, 'Arial, negrita, 8', salida, 'S');
+  end;
+
+  if InfResumido then Begin
+    derivanalisis.getDatos(idanter);
+    List.Linea(0, 0, derivanalisis.Descrip, 1, 'Arial, negrita, 9', salida, 'S');
+    List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+    List.Linea(0, 0, '    ', 1, 'Arial, negrita, 5', salida, 'S');
+  end;
+
+  List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+  List.Linea(0, 0, 'Total de Solicitudes Derivadas:', 1, 'Arial, normal, 9', salida, 'S');
+  List.importe(60, list.lineactual, '#######', totderiv, 2, 'Arial, negrita, 9');
+  List.importe(95, list.lineactual, '', totales[2], 3, 'Arial, negrita, 9');
+  List.Linea(0, 0, '    ', 1, 'Arial, negrita, 3', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 8', salida, 'S');
+
+  DatosGrafico(total);
+
+  Q.Close;
+  paciente.desconectar;
+  nomeclatura.desconectar;
+  obsocial.desconectar;
+end;
+
+procedure TTInformesEstadisticos.TotalAnalisis(salida: char; msg, xcod, xdes: string);
+begin
+  if not InfResumido then List.Linea(0, 0, ' ', 1, 'Arial, normal, 8', salida, 'N');
+  if not InfResumido then Begin
+    List.Linea(0, 0, msg, 1, 'Arial, negrita, 9', salida, 'N');
+    List.importe(60, list.lineactual, '#######', total, 2, 'Arial, negrita, 9');
+    List.Linea(95, list.Lineactual, '', 3, 'Arial, negrita, 9', salida, 'S');
+  end;
+  if InfResumido then Begin
+    if (salida = 'P') or (salida = 'I') then begin
+      List.Linea(0, 0, msg, 1, 'Arial, normal, 9', salida, 'N');
+      List.importe(60, list.lineactual, '#######', total, 2, 'Arial, normal, 9');
+      List.Linea(95, list.Lineactual, '', 3, 'Arial, negrita, 9', salida, 'S');
+    end;
+    if (salida = 'X') then begin
+        Inc(c1); l1 := Trim(IntToStr(c1));
+        excel.setString('a' + l1, 'a' + l1, xcod, 'Arial, normal, 9');
+        excel.setString('b' + l1, 'b' + l1, xdes, 'Arial, normal, 9');
+        excel.setInteger('c' + l1, 'c' + l1, StrToInt(FloatToStr(total)), 'Arial, negrita, 9');
+    end;
+  end;
+  if not InfResumido then Begin
+    List.Linea(95, list.lineactual, ' ', 3, 'Arial, normal, 8', salida, 'S');
+    List.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+    List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
+  end;
+  DatosGrafico(total);
+  total := 0;
+end;
+
+procedure TTInformesEstadisticos.ListListadoPorOrdenes(salida: char);
+// Objetivo...: Discriminación de análisis por ordenes entregadas y no entregadas
+var
+  idpac, idos: string;
+begin
+  if not s_inicio then verifListado(salida);
+
+  Q.Open;
+  List.Linea(0, 0, 'Paciente', 1, 'Arial, cursiva, 8', salida, 'S');
+  List.Linea(35, list.Lineactual, 'Obra Social', 2, 'Arial, cursiva, 8', salida, 'S');
+  List.Linea(65, list.Lineactual, 'Análisis', 3, 'Arial, cursiva, 8', salida, 'S');
+
+  List.Linea(0, 0, ' ', 1, 'Arial, cursiva, 5', salida, 'S');
+  List.Linea(0, 0, 'Ordenes Adeudadas', 1, 'Arial, negrita, 11', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 5', salida, 'S');
+
+  paciente.conectar;
+  obsocial.conectar;
+  nomeclatura.conectar;
+
+  while not Q.EOF do Begin
+    paciente.getDatos(Q.FieldByName('codpac').AsString);
+    obsocial.getDatos(Q.FieldByName('codos').AsString);
+    nomeclatura.getDatos(Q.FieldByName('codanalisis').AsString);
+    if (Q.FieldByName('entorden').AsString = 'N') and (Q.FieldByName('codos').AsString <> '000000') then Begin
+      if Q.FieldByName('codpac').AsString <> idpac then list.Linea(0, 0, paciente.nombre, 1, 'Arial, normal, 8', salida, 'N') else list.Linea(0, 0, '  ', 1, 'Arial, normal, 8', salida, 'N');
+      if Q.FieldByName('codos').AsString <> idos then list.Linea(35, list.Lineactual, Copy(obsocial.nombre, 1, 30), 2, 'Arial, normal, 8', salida, 'N') else list.Linea(35, list.Lineactual, '  ', 2, 'Arial, normal, 8', salida, 'N');
+      list.Linea(65, list.Lineactual, nomeclatura.codigo  + '  ' + nomeclatura.descrip, 3, 'Arial, normal, 8', salida, 'S');
+      idpac := Q.FieldByName('codpac').AsString;
+      idos  := Q.FieldByName('codos').AsString;
+    end;
+    Q.Next;
+  end;
+
+  List.Linea(0, 0, ' ', 1, 'Arial, cursiva, 5', salida, 'S');
+  List.Linea(0, 0, 'Ordenes Entregadas', 1, 'Arial, negrita, 11', salida, 'S');
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 5', salida, 'S');
+
+  Q.First; idpac := ''; idos := '';
+  while not Q.EOF do Begin
+    paciente.getDatos(Q.FieldByName('codpac').AsString);
+    obsocial.getDatos(Q.FieldByName('codos').AsString);
+    nomeclatura.getDatos(Q.FieldByName('codanalisis').AsString);
+    if (Q.FieldByName('entorden').AsString = 'S') and (Q.FieldByName('codos').AsString <> '000000') then Begin
+      if Q.FieldByName('codpac').AsString <> idpac then list.Linea(0, 0, paciente.nombre, 1, 'Arial, normal, 8', salida, 'N') else list.Linea(0, 0, '  ', 1, 'Arial, normal, 8', salida, 'N');
+      if Q.FieldByName('codos').AsString <> idos then list.Linea(35, list.Lineactual, Copy(obsocial.nombre, 1, 30), 2, 'Arial, normal, 8', salida, 'N') else list.Linea(35, list.Lineactual, '  ', 2, 'Arial, normal, 8', salida, 'N');
+      list.Linea(65, list.Lineactual, nomeclatura.codigo  + '  ' + nomeclatura.descrip, 3, 'Arial, normal, 8', salida, 'S');
+      idpac := Q.FieldByName('codpac').AsString;
+      idos  := Q.FieldByName('codos').AsString;
+    end;
+    Q.Next;
+  end;
+  List.Linea(0, 0, ' ', 1, 'Courier New, normal, 8', salida, 'S');
+  Q.Close;
+
+  paciente.desconectar;
+  obsocial.desconectar;
+  nomeclatura.desconectar;
+end;
+
+procedure TTInformesEstadisticos.ListPorObraSocial_Paciente(xdfecha, xhfecha, xcodos: string; salida: char);
+var
+  idpac, idos: string; importe: real; listmov: boolean;
+begin
+  if not s_inicio then Begin
+    list.Titulo(0, 0, ' ', 1, 'Arial, normal, 14');
+    list.Titulo(0, 0, 'Listado de Movimientos por Obra Social', 1, 'Arial, negrita, 14');
+    list.Titulo(0, 0, ' ', 1, 'Arial, normal, 8');
+    List.Titulo(0, 0, 'Obra Social', 1, 'Arial, cursiva, 8');
+    List.Titulo(20, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
+    List.Titulo(50, list.Lineactual, 'Análisis', 3, 'Arial, cursiva, 8');
+    List.Titulo(92, list.Lineactual, 'Importe', 4, 'Arial, cursiva, 8');
+    List.Linea(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11', salida, 'S');
+    List.Titulo(0, 0, ' ', 1, 'Arial, cursiva, 5');
+  end;
+  s_inicio := True;
+
+  paciente.conectar;
+  obsocial.conectar;
+  nomeclatura.conectar;
+
+  listmov := False;
+  if xcodos = '-' then listmov := True;
+
+  Q.Open; idpac := ''; idos := '';  total := 0;
+  while not Q.EOF do Begin
+   if Q.FieldByName('codos').AsString <> '000000' then Begin
+     if xcodos <> '-' then if Q.FieldByName('codos').AsString = xcodos then listmov := True else listmov := False;
+    if listmov then begin
+      paciente.getDatos(Q.FieldByName('codpac').AsString);
+      obsocial.getDatos(Q.FieldByName('codos').AsString);
+      if not infresumido then Begin
+        if (Q.FieldByName('codpac').AsString <> idpac) and (total > 0) then list9984(salida); // Código de recepción y toma
+        if Q.FieldByName('codos').AsString <> idos then list.Linea(0, 0, obsocial.nombre, 1, 'Arial, normal, 8', salida, 'N') else list.Linea(0, 0, '  ', 1, 'Arial, normal, 8', salida, 'N');
+        if Q.FieldByName('codpac').AsString <> idpac then list.Linea(20, list.Lineactual, paciente.nombre, 2, 'Arial, normal, 8', salida, 'N') else list.Linea(20, list.Lineactual, '  ', 2, 'Arial, normal, 8', salida, 'N');
+        importe := solanalisis.setValorAnalisis(Q.FieldByName('codos').AsString, Q.FieldByName('codanalisis').AsString, Copy(Q.FieldByName('fecha').AsString, 5, 2) + '/' + Copy(Q.FieldByName('fecha').AsString, 1, 4));
+        nomeclatura.getDatos(Q.FieldByName('codanalisis').AsString);
+        list.Linea(50, list.Lineactual, nomeclatura.codigo  + '  ' + nomeclatura.descrip, 3, 'Arial, normal, 8', salida, 'N');
+        list.importe(98, list.Lineactual, '', importe, 4, 'Arial, normal, 8');
+        list.Linea(99, list.Lineactual, '  ', 5, 'Arial, normal, 8', salida, 'S');
+      end else Begin
+        if Q.FieldByName('codos').AsString <> idos then
+          if Length(Trim(idos)) > 0 then Begin
+            LineaResumen(idos, totos, salida);
+            totos := 0;
+          end;
+      end;
+      total := total + importe;
+      totos := totos + importe;
+      idpac := Q.FieldByName('codpac').AsString;
+      idos  := Q.FieldByName('codos').AsString;
+    end;
+   end;
+   Q.Next;
+  end;
+  Q.Close;
+
+  if infresumido then
+    if Length(Trim(idos)) > 0 then LineaResumen(idos, totos, salida);
+
+  if not infresumido then
+    if Length(Trim(idos)) > 0 then list9984(salida);
+
+  if total <> 0 then Begin
+    List.Linea(0, 0, '    ', 1, 'Arial, normal, 8', salida, 'S');
+    List.derecha(98, list.Lineactual, '###################', '-------------------', 2, 'Arial, normal, 9');
+    List.Linea(0, 0, 'Importe Total Facturado:', 1, 'Arial, cursiva, 8', salida, 'S');
+    List.importe(98, list.lineactual, '', total, 2, 'Arial, negrita, 8');
+  end;
+  List.Linea(0, 0, '    ', 1, 'Arial, negrita, 4', salida, 'S');
+
+  paciente.desconectar;
+  obsocial.desconectar;
+  nomeclatura.desconectar;
+end;
+
+procedure TTInformesEstadisticos.list9984(salida: char);
+var
+  t: Real;
+begin
+  t     := solanalisis.Total9984;
+  total := total + t;
+  totos := totos + t;
+  nomeclatura.getDatos(solanalisis.Codftoma);
+  list.Linea(0, 0, '  ', 1, 'Arial, normal, 8', salida, 'N');
+  list.Linea(20, list.Lineactual, '  ', 2, 'Arial, normal, 8', salida, 'N');
+  list.Linea(50, list.Lineactual, solanalisis.Codftoma  + '  ' + nomeclatura.descrip, 3, 'Arial, normal, 8', salida, 'N');
+  list.importe(98, list.Lineactual, '', t, 4, 'Arial, normal, 8');
+  list.Linea(99, list.Lineactual, '  ', 5, 'Arial, normal, 8', salida, 'S');
+end;
+
+procedure TTInformesEstadisticos.LineaResumen(xidos: string; importe: real; salida: char);
+begin
+  obsocial.getDatos(xidos);
+  list.Linea(0, 0, obsocial.nombre, 1, 'Arial, normal, 8', salida, 'N');
+  list.importe(98, list.Lineactual, '', importe, 2, 'Arial, normal, 8');
+  list.Linea(99, list.Lineactual, '  ', 3, 'Arial, normal, 8', salida, 'S');
+end;
+
+{===============================================================================}
+
+function estadistsocios: TTInformesEstadisticos;
+begin
+  if xestadistica = nil then
+    xestadistica := TTInformesEstadisticos.Create;
+  Result := xestadistica;
+end;
+
+{===============================================================================}
+
+initialization
+
+finalization
+  xestadistica.Free;
+
+end.
