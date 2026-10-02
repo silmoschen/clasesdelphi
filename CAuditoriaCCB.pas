@@ -26,7 +26,8 @@ TTAuditoriaCCB = class
   destructor  Destroy; override;
 
   function    Buscar(xnroauditoria: String): Boolean;
-  procedure   Registrar(xnroauditoria, xfecha, xcodos, xidzona, xnrodoc, xpaciente, xidprof, xdiagnostico, xfederivacion, xnroderivacion, xobservacion, xcodosfact, xfepedido, xprofcab, xiddiag, xobservacfinal: String; r_log: Boolean; xonline, xanulada, xnroautorizacion, xnrotransaccion: string);
+  procedure   Registrar(xnroauditoria, xfecha, xcodos, xidzona, xnrodoc, xpaciente, xidprof, xdiagnostico, xfederivacion, xnroderivacion, xobservacion, xcodosfact, xfepedido, xprofcab, xiddiag, xobservacfinal: String; r_log: Boolean;
+                        xonline, xanulada, xnroautorizacion, xnrotransaccion, xtoken, xnumerodoc: string);
   procedure   RegistrarItems(xnroauditoria, xitems, xcodigo, xdeterminacion, xestado: String; xmonto, xmontodif: Real; xCantidad: Integer; r_log: Boolean; xonline, xanulada: string; xmontoonline, xcoseguro: real);
   procedure   SincronizarItems(xnroauditoria, xitems, xcodigo, xdeterminacion, xestado: String; xmonto, xmontodif: Real; r_log: Boolean; xonline, xanulada: string; xmontoonline: real);
   procedure   getDatos(xnroauditoria: String);
@@ -237,7 +238,8 @@ Begin
   Result := Existe;
 end;
 
-procedure TTAuditoriaCCB.Registrar(xnroauditoria, xfecha, xcodos, xidzona, xnrodoc, xpaciente, xidprof, xdiagnostico, xfederivacion, xnroderivacion, xobservacion, xcodosfact, xfepedido, xprofcab, xiddiag, xobservacfinal: String; r_log: Boolean; xonline, xanulada, xnroautorizacion, xnrotransaccion: string);
+procedure TTAuditoriaCCB.Registrar(xnroauditoria, xfecha, xcodos, xidzona, xnrodoc, xpaciente, xidprof, xdiagnostico, xfederivacion, xnroderivacion, xobservacion, xcodosfact, xfepedido, xprofcab, xiddiag, xobservacfinal: String; r_log: Boolean;
+                                   xonline, xanulada, xnroautorizacion, xnrotransaccion, xtoken, xnumerodoc: string);
 // Objetivo...: Registrar una Instancia
 var
  fd: string;
@@ -295,6 +297,8 @@ Begin
   cabauditoria.FieldByName('anulada').AsString       := xanulada;
   cabauditoria.FieldByName('nroautorizacion').AsString := xnroautorizacion;
   cabauditoria.FieldByName('transaccion').AsString     := xnrotransaccion;
+  cabauditoria.FieldByName('token').AsString           := xtoken;
+  cabauditoria.FieldByName('numerodoc').AsString       := xnumerodoc;
   try
     cabauditoria.Post
    except

@@ -282,8 +282,9 @@ begin
       except
         tnumfact.Cancel;
       end;
-      //datosdb.closeDB(tnumfact);
-      tnumfact.Refresh;
+      datosdb.closeDB(tnumfact);
+      tnumfact.Open;
+      //tnumfact.Refresh;
     end;
 end;
 

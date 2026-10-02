@@ -66,11 +66,13 @@ begin
     tDB.DatabaseName := 'PersistObjetos';
     tDB.LoginPrompt  := False;
     if t.FieldByName('DBClientServ').AsString = 'S' then Begin   // Conexiones ODBC
+
       tDB.AliasName  := t.FieldByName('Odbcdrv').AsString;
       baseDat        := 'PersistObjetos';
       tDB.Params.Add('USER NAME=' + t.FieldByName('usuario').AsString);
       tDB.Params.Add('PASSWORD=' + t.FieldByName('password').AsString);
       xpassword      := t.FieldByName('password').AsString;
+
       //StoredProc     := t.FieldByName('StoredProc').AsString;
     end else Begin                                              // Conexiones Standard - Paradox o dBase
       tDB.DriverName := 'STANDARD';

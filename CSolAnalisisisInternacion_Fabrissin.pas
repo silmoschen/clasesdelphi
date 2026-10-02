@@ -59,6 +59,7 @@ TTSolicitudAnalisisFabrissinInternacion = class
   procedure   ListarSolicitudesValorizadasPorFechaFacturacion(xcodsan, xdesde, xhasta: String; salida: char);
   procedure   ListarSolicitudesValorizadasPorFechaFacturacionResumidas(xcodsan, xdesde, xhasta: String; salida: char);
   procedure   ListarCodigosSolicitudes(xcodsan, xcodpac: String; xlistadmisiones: TStringList; salida: char);
+  procedure   ListarControlOrdenesExt(codsan, xdesde, xhasta: string; salida: char);
 
   // -- Estadísticas --
 
@@ -2183,6 +2184,57 @@ begin
     list.FinList;
   end;
   if salida = 'T' then list.FinalizarImpresionModoTexto(1);
+end;
+
+procedure TTSolicitudAnalisisFabrissinInternacion.ListarControlOrdenesExt(codsan, xdesde, xhasta: string; salida: char);
+var
+  r: TQuery;
+begin
+  listdat := False; pag := 0;
+  if (salida = 'P') or (salida = 'I') then Begin
+    sanatorio.getDatos(codsan);
+    list.Setear(salida);
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, 'Sanatorio: ' +  sanatorio.Descrip, 1, 'Arial, negrita, 14');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, 'Control de Ordenes de Pacientes - Sanatorio: ' + sanatorio.Descrip + ' - Lapso: ' + xdesde + ' - ' + xhasta, 1, 'Arial, negrita, 12');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
+    List.Titulo(0, 0, 'Protocolo', 1, 'Arial, cursiva, 8');
+    List.Titulo(12, List.Lineactual, 'Fecha', 2, 'Arial, cursiva, 8');
+    List.Titulo(25, List.lineactual, 'Paciente', 3, 'Arial, cursiva, 8');
+    List.Titulo(55, List.lineactual, 'Obra Social', 4, 'Arial, cursiva, 8');
+    List.Titulo(82, List.lineactual, 'Médico/Profesional', 5, 'Arial, cursiva, 8');
+    List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
+    List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 8');
+  End;
+
+  r := datosdb.tranSQL('select * from solicitudint where codsan = ' + '''' + codsan + '''' + ' and fecha >= ' + '''' + utiles.sExprFecha2000(xdesde) + '''' + ' and fecha <= ' + '''' + utiles.sExprFecha2000(xhasta) + '''' + ' order by protocolo');
+  r.open;
+
+  while not r.eof do begin
+    paciente.getDatos(r.FieldByName('codpac').asstring);
+    paciente.getObservacion(r.FieldByName('codpac').asstring);
+    obsocial.getDatos(r.FieldByName('codos').AsString);
+    profesional.getDatos(r.FieldByName('idprof').asstring);
+
+    list.Linea(0, 0, solicitud.FieldByName('protocolo').AsString, 1, 'Arial, normal, 8', salida, 'N');
+    list.Linea(12, list.Lineactual, utiles.sFormatoFecha(solicitud.FieldByName('fecha').AsString), 2, 'Arial, normal, 8', salida, 'N');
+    list.Linea(25, list.Lineactual, paciente.nombre, 3, 'Arial, normal, 8', salida, 'N');
+    list.Linea(55, list.Lineactual, Copy(obsocial.nombre, 1, 30), 4, 'Arial, normal, 8', salida, 'N');
+    list.Linea(82, list.Lineactual, profesional.nombres, 5, 'Arial, normal, 8', salida, 'S');
+
+    if (paciente.Observaciones <> '') then begin
+      list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'N');
+      list.Linea(25, list.Lineactual, paciente.Observaciones, 2, 'Arial, cursiva, 8', salida, 'S');
+    end;
+
+    r.next;
+  end;
+
+  r.close; r.free;
+
+  list.FinList;
+
 end;
 
 

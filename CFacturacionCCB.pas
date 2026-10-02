@@ -2,10 +2,10 @@ unit CFacturacionCCB;
 
 interface
 
-uses CObrasSocialesCCB, CProfesionalCCB, CPacienteCCB, CNomeclaCCB, SysUtils, CListar,
+uses CObrasSocialesCCB, CProfesionalCCB, CPacienteCCB, CNomeclaCCB, SysUtils, CListar,  
      DB, DBTables, CBDT, CUtiles, CIDBFM, CUsuario, Forms, Unit1, WinProcs, CUtilidadesArchivos,
      Classes, CServers2000_Excel, CNBU, CNomeclatura_ObraSocial, CAgrupacionOSFact, CUnidadesNBU,
-     CFirebird, IBTable, IBQuery, uLkJSON;
+     CFirebird, IBTable, IBQuery, uLkJSON, CComregi;
 
 const
   elementos = 10;
@@ -22,6 +22,7 @@ type
   ExcluirLab, SC, DetMontoFijo, exporta_web, listtotalboleta, exporta_afip: Boolean;
   listlab: array[1..elementos+5] of String;
   cabfact, detfact, idordenes, parametrosInf, modeloc, cabfactos, liq, datosfact, datosfactdet, ctrlImpr, historico, totalesOS, totalesPROF, ordenes_audit, datosImport, cab_auditoria, det_auditoria, wtotalesprof: TTable;
+  unidadNBUFinal: double;
   //cabfactIB, detfactIB, idordenesIB, ordenes_auditIB, cab_auditoriaIB, det_auditoriaIB: TIBTable;
   interbase: string;
  public
@@ -62,6 +63,7 @@ type
   function    setTot9984: Real;
   function    set9984: Real;
   function    setCodigoMontoFijo: String;
+  function    setNbuNomencladorObraSocial(xcodos, xcodigo: string): Real;
 
   procedure   ListarResumenPrestacionesPorObraSocial(xperiodo, xtitulo, xcolumnas: String; ObrasSocSel: TStringList; salida: char);
   procedure   ListarResumenPorObraSocial(xperiodo, xtitulo: String; ObrasSocSel: TStringList; salida: char; xinf_com: Boolean);
@@ -278,13 +280,15 @@ type
 
   function   getListPracticasFacturadas(xperiodo, xcodos: string): TIBQuery;
   function   getListItemsFacturados(xperiodo, xcodos: string): TIBQuery;
+  function   getListItemsFacturadosProfesional(xperiodo, xcodos, xidprof: string): TIBQuery;
   function   getListItemsFacturadosSNF(xperiodo, xcodos: string): TIBQuery;
 
   procedure  recalcularMontosAnalisis(xperiodo, xcodos: string);
   procedure  recalcularMontosAnalisisRI(xperiodo, xcodos: string);
   function   getFacturas(xperiodo: string): TQuery;
   procedure  registrarCAE(xperiodo, xcodos, xcae, xtipo, xsucursal, xnumero, xfecha, xfechavto1, xfechavto2, xvtocae, xcodigocomprobante: string);
-  procedure  generarFactura(xperiodo, xcodos, xinicioactividad, xcomprobante: string; xcopias: integer);
+  procedure  registrarFechaVto2(xperiodo, xcodos, xfechavto2: string);
+  procedure  generarFactura(xperiodo, xcodos, xinicioactividad, xcomprobante, xcbu: string; xcopias: integer);
 
   procedure  exportarTotalesRI(xperiodo: string);
   procedure  exportarDetalleFacturacion(xperiodo: string);
@@ -304,11 +308,14 @@ type
 
   procedure  listarUBFacturadas(xperiodo: string; salida: char);
 
+  function   verificarOrdenFacturada(xperiodo, xorden: String): Boolean;
+  procedure  IniciarCache;
+
  private
   { Declaraciones Privadas }
   conexiones, pag: integer; lin, idanter, idanter1, ordenanter, codosanter, idprofanter, codftoma, titulo, columnas, npac, diractual, DBConexion, dir_lab, osretieneiva, pac_retiva, __c, __t: String;
   nrocol, espaciocol, distanciaImp: ShortInt; it, xf: Integer;
-  cantidad, cantidadordenes, totprestaciones: Integer; subtotal, m9984, tot9984, totUG, totUB, canUG, canUB, total, ttotUB, caran, ivaret, ivaret9984, ivaretcaran, ivaexento, ivaexe9984, ivaexecaran, subtotalorden: real;
+  cantidad, cantidadordenes, totprestaciones: Integer; subtotal, m9984, tot9984, totUG, totUB, canUG, canUB, total, ttotUB, caran, ivaret, ivaret9984, ivaretcaran, ivaexento, ivaexe9984, ivaexecaran, subtotalorden, __nbuos: real;
   ttotprestaciones, ccantidadordenes, tttotUB, ttotUG, ccanUB, ccanUG, ccaran, ttotal, compensacion, totcomp, canUB1, totUBSin9984, totUGSin9984, totUB9984, totUG9984, _ccaranSin9984, _ccaran9984, canUB9984, total_orden: Real;
   CHR18, CHR15, Caracter, msgImpresion, DBCentral, fx, codigomontofijo, perrem, labrem: String;
   ProcesamientoCentral, informe_ivaret, codigo_tomamuestra, datosListadosFact, u_h, nnbu, proceso_central, campo1, __laboratorios: Boolean;
@@ -766,11 +773,14 @@ begin
     totiva[1] := 0; totiva[2] := 0;
 
     profesional.getDatos(rs.FieldByName('idprof').AsString);
+
+    profesional.SincronizarListaRetIVA(xperiodo, rs.FieldByName('idprof').AsString);
+
     if (profesional.Retieneiva = 'S') then begin
       if (rs.FieldByName('retiva').AsString = 'S') then totiva[1] := monto;
       if (rs.FieldByName('retiva').AsString = 'N') then totiva[2] := monto;
     end;
-
+    
     lote.Add('update detfact set monto = ' + utiles.StringRemplazarCaracteres(FloatToStr(monto), ',', '.') + ', ' +
              'iva = ' + utiles.StringRemplazarCaracteres(FloatToStr(totiva[1]), ',', '.') + ', ' +
              'exento = ' + utiles.StringRemplazarCaracteres(FloatToStr(totiva[2]), ',', '.') + ' ' +
@@ -817,7 +827,22 @@ begin
   end;
 end;
 
-procedure TTFacturacionCCB.generarFactura(xperiodo, xcodos, xinicioactividad, xcomprobante: string; xcopias: integer);
+procedure TTFacturacionCCB.registrarFechaVto2(xperiodo, xcodos, xfechavto2: string);
+begin
+  if BuscarDatosFact(xperiodo, xcodos) then begin
+      datosfact.Edit;
+      datosfact.FieldByName('fechavto2').AsString := xfechavto2;
+      try
+        datosfact.Post
+       except
+        datosfact.Cancel
+      end;
+      datosdb.refrescar(datosfact);
+  end;
+end;
+
+
+procedure TTFacturacionCCB.generarFactura(xperiodo, xcodos, xinicioactividad, xcomprobante, xcbu: string; xcopias: integer);
 var
   r: TQuery;
   i, j: integer;
@@ -844,7 +869,7 @@ begin
     osiva := osagrupa.Codpfis;
     osloc := osagrupa.Localidad;
     osnombre := osagrupa.Nombre;
-  end;                                                                           
+  end;
 
   r := datosdb.tranSQL('select datosfact.periodo, datosfact.codos, datosfact.tipo, datosfact.sucursal, datosfact.numero, datosfact.fecha, datosfact.idcompr, datosfact.vtocae, ' +
     'datosfact.fechavto1, datosfact.fechavto2, datosfact.cae, datosfact.obrasocial, datosfact.cuit, datosfact.monto, datosfactdet.items, datosfactdet.descrip, ' +
@@ -890,6 +915,7 @@ begin
       t.FieldByName('p3').asstring := osiva;
       t.FieldByName('p4').asstring := osloc;
       t.FieldByName('p5').asstring := xinicioactividad;
+      t.FieldByName('par3').asstring := xcbu;
       try
         t.post
       except
@@ -2000,31 +2026,52 @@ begin
 
       // Verificamos si tiene unidad diferencial
       unidadNBU := obsocial.setUnidadNBU(xcodos, xcodanalisis, periodo);
+      unidadNBUFinal := unidadNBU;
+
       if unidadNBU > 0 then i := {nbu.unidad} obsocial.valorNBU * unidadNBU;  //utiles.msgError(floattostr(nbu.unidad) + '   ' + floattostr(unidadNBU) + '   ' + floattostr(i));
 
+      //========================================================================
+
       // Verificamos si la OS tiene nomenclador propio
+      __nbuos := 0;
       if (nomeclaturaos.Buscar(xcodos, xcodanalisis)) then begin
-        nomeclaturaos.getDatos(xcodos, xcodanalisis);
+
+        //nomeclaturaos.getDatos(xcodos, xcodanalisis);
+        // remplazado 11/03/2026 para el prorrateo de unidades
+        nomeclaturaos.getDatosUnidades(xcodos, xcodanalisis, periodo);
+
+        unidadNBUFinal := nomeclaturaos.unidad;
+
+        __nbuos := nomeclaturaos.unidad;
         if (nomeclaturaos.Especial <> '*') then begin
           if i = 0 then i := nomeclaturaos.unidad * obsocial.valorNBU;
         end else begin
           if i = 0 then i := nomeclaturaos.unidades * obsocial.valorNBU;
         end;
-      end;
 
-      // 12/07/2010 -> NBU unidades por periodo
-      unidad_NBU := nbu.unidad;
-      __un := unidadesNBU.getUnidad(xcodanalisis, periodo);
-      //if (unidadesNBU.getUnidades > 0) then
-      if (__un > 0) then
-
-        unidad_NBU := __un; //unidadesNBU.getUnidades;
-
-      if (nbu.Especial <> '*') then begin
-        if i = 0 then i := unidad_NBU * obsocial.valorNBU;
       end else begin
-        if i = 0 then i := unidad_NBU * obsocial.valorNBUDif;
+
+        // 12/07/2010 -> NBU unidades por periodo
+        unidad_NBU := nbu.unidad;
+        __un := unidadesNBU.getUnidad(xcodanalisis, periodo);
+        //if (unidadesNBU.getUnidades > 0) then
+        if (__un > 0) then begin
+
+          unidad_NBU := __un; //unidadesNBU.getUnidades;
+
+          unidadNBUFinal := __un; // 10/08/2026
+
+        end;
+
+        if (nbu.Especial <> '*') then begin
+          if i = 0 then i := unidad_NBU * obsocial.valorNBU;
+        end else begin
+          if i = 0 then i := unidad_NBU * obsocial.valorNBUDif;
+        end;
+      
       end;
+
+      // =======================================================================
 
       //if not (ExcluirLab) then begin   // agregado el 29/01/2010
       {if paciente.Gravadoiva = 'S' then Begin
@@ -2073,6 +2120,14 @@ begin
   end;
 
   Result := i;
+end;
+
+function TTFacturacionCCB.setNbuNomencladorObraSocial(xcodos, xcodigo: string): Real;
+// 26/09/2025
+begin
+  nomeclaturaos.getDatos(xcodos, xcodigo);
+  __nbuos := nomeclaturaos.unidad;
+  result := __nbuos;
 end;
 
 function TTFacturacionCCB.setUB: Real;
@@ -12389,15 +12444,56 @@ end;
 
 function TTFacturacionCCB.getListItemsFacturados(xperiodo, xcodos: string): TIBQuery;
 begin
-  result := ffirebird.getTransacSQL('select idprof, fecha, items, orden, codanalisis, monto, iva, exento, nroautorizacion, nroafiliado, nroauditoria, nombre from detfact ' +
+  result := ffirebird.getTransacSQL('select idprof, fecha, items, orden, codanalisis, monto, iva, exento, nroautorizacion, nroafiliado, nroauditoria, nombre, ref1 from detfact ' +
   'where periodo=' + '''' + xperiodo + '''' +  ' and codos=' + '''' + xcodos + '''' + ' and fecha is not null and monto > 0 and orden >= ' + '''' + '5000' + '''' + ' order by idprof, codpac, orden, items');
 end;
+
+function TTFacturacionCCB.getListItemsFacturadosProfesional(xperiodo, xcodos, xidprof: string): TIBQuery;
+begin
+  result := ffirebird.getTransacSQL('select idprof, fecha, items, orden, codanalisis, monto, iva, exento, nroautorizacion, nroafiliado, nroauditoria, nombre from detfact ' +
+  'where periodo=' + '''' + xperiodo + '''' +  ' and codos=' + '''' + xcodos + '''' + ' and idprof=' + '''' + xidprof + '''' + 
+  ' and fecha is not null and monto > 0 and orden >= ' + '''' + '5000' + '''' + ' order by idprof, codpac, orden, items');
+end;
+
 
 function TTFacturacionCCB.getListItemsFacturadosSNF(xperiodo, xcodos: string): TIBQuery;
 begin
   result := ffirebird.getTransacSQL('select idprof, fecha, items, orden, codanalisis, monto, iva, exento, nroautorizacion, nroafiliado, nroauditoria from detfact ' +
   'where periodo=' + '''' + xperiodo + '''' +  ' and codos=' + '''' + xcodos + '''' + ' and monto > 0 ' + ' order by idprof, codpac, orden, items');
 end;
+
+function TTFacturacionCCB.verificarOrdenFacturada(xperiodo, xorden: String): Boolean;
+var
+  r: boolean;
+begin
+  r := false;
+  rsqlIB :=  ffirebird.getTransacSQL('select count(periodo) as cant from ordenes_audit where nroauditoria = ' + '''' + xorden + '''' + ' and periodo <= ' + '''' + xperiodo + '''');
+  rsqlIB.Open;
+  //utiles.msgError(rsqlIB.FieldByName('cant').AsString);
+  if (rsqlIB.FieldByName('cant').AsInteger > 0) then r := true;
+  //if (rsqlIB.FieldByName('periodo').AsString <> '') then
+    //if (rsqlIB.FieldByName('periodo').AsString <> xperiodo) then r := false;
+  rsqlIB.Close; rsqlIB.free;
+  //utiles.msgError('select periodo from ordenes_audit where nroauditoria = ' + '''' + xorden + '''' + ' and periodo <> ' + '''' + xperiodo + '''');
+  result := r;
+  {
+  r := true;
+  rsqlIB :=  ffirebird.getTransacSQL('select periodo from ordenes_audit where nroauditoria = ' + '''' + xorden + '''' + ' and periodo <> ' + '''' + xperiodo + '''');
+  rsqlIB.Open;
+  if (rsqlIB.FieldByName('periodo').AsString <> '') then
+    if (rsqlIB.FieldByName('periodo').AsString <> xperiodo) then r := false;
+  rsqlIB.Close; rsqlIB.free;
+  //if (r) then utiles.msgError('si') else  utiles.msgError('no');
+  result := r;}
+end;
+
+procedure TTFacturacionCCB.IniciarCache;
+begin
+  if (__codigos <> nil) then __codigos.Clear;
+  if (__montos <> nil) then __montos.Clear;
+end;
+
+
 
 {===============================================================================}
 

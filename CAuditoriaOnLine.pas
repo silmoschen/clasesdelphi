@@ -10,7 +10,8 @@ type
 
 TTAuditoriaOnLine = class
   Idonline, Nroauditoria, Fecha, Efector, Codos, Idzona, Nrodoc, Idprof, Observacion,
-  Iddiag, Diferida, Fepedido, Auditada, Transferida, Altapac, Obsauditor, Referencia, Nroautorizacion: String;
+  Iddiag, Diferida, Fepedido, Auditada, Transferida, Altapac, Obsauditor, Referencia,
+  Nroautorizacion, Token, Numerodoc: String;
  public
   { Declaraciones Públicas }
   constructor Create;
@@ -41,6 +42,8 @@ TTAuditoriaOnLine = class
   function    getOrdenes(xdesde, xhasta, xidprof: string): TQuery;
 
   procedure   ChequearReferencias;
+
+  function    verificarOrdenFacturada(xnroauditoria: string): boolean;
 
   procedure   conectar;
   procedure   desconectar;
@@ -145,7 +148,7 @@ var
   iidonline, inroauditoria, iefector, ifecha, icodos, iidzona, inrodoc,
   iidprof, ifepedido, iobservacion, iiddiag, idiferida, inombre, iprofcab: string;
   didonline, ditems, dcodigo, destado, altapac, codosanter, iobsauditor, ianulada, iid, imontoon,
-  var1, var2, var3, var4, var5, expediente, nroaut, iretiva: string;
+  var1, var2, var3, var4, var5, expediente, nroaut, iretiva, token, numerodoc: string;
   imonto, icoseguro: real;
   lista, listaos, lista_det, lista_pac, lista_cab: TStringList; i, p, a, k, m: integer;
 begin
@@ -207,7 +210,21 @@ begin
         icodos       := copy(linea1, 48, 6);
         iidzona      := copy(linea1, 55, 2);
         inrodoc      := UpperCase(trim(copy(linea1, 59, 15)));
+
         iidprof      := copy(linea1, 76, 5);
+        ifepedido    := ifecha; // copy(linea1, 102, 8);
+        iiddiag      := copy(linea1, 120, 7);
+        idiferida    := copy(linea1, 130, 1);
+        ianulada     := copy(linea1, 132, 1);
+        iprofcab     := copy(linea1, 533, 15);
+        expediente   := trim(copy(linea1, 546, 20));
+        //nroaut       := trim(copy(linea1, 567, 20));
+        nroaut       := trim(copy(linea1, 565, 25));
+        //if (nroaut = '122533658') then utiles.msgError(nroaut);
+        
+
+        {  13/07/2025 }
+        {iidprof      := copy(linea1, 76, 5);
         ifepedido    := ifecha; // copy(linea1, 102, 8);
         iiddiag      := copy(linea1, 113, 5);
         idiferida    := copy(linea1, 123, 1);
@@ -215,6 +232,12 @@ begin
         iprofcab     := copy(linea1, 526, 6);
         expediente   := copy(linea1, 533, 20);
         nroaut       := copy(linea1, 554, 20);
+        //}
+
+        // 15/05/2026 Token
+        token       := trim(copy(linea1, 586, 15));
+        numerodoc   := trim(copy(linea1, 606, 15));
+
 
         if (length(trim(ianulada)) = 0) then ianulada := 'N';
 
@@ -227,10 +250,15 @@ begin
         iobsauditor  := trimleft(copy(linea1, 301, 130));
 
         // Buscamos la orden online, si no está, la damos de alta
+                // anulado el 13/07/2025
         if not (BuscarReferencia(iidonline)) then
           nuevo_nroauditoria := utiles.sLlenarIzquierda(auditoriacb.setNuevoNroAuditoria, 10, '0')
         else
           nuevo_nroauditoria := cabref.FieldByName('nroauditoria').AsString;
+        //------------------------------------------------------------------
+
+        // 13/07/2025 => unificamos los numeros
+        ///nuevo_nroauditoria := iidonline;
 
         altapac := 'N';
         if (icodos <> codosanter) then begin
@@ -270,6 +298,8 @@ begin
         cabref.FieldByName('auditor').AsString      := copy(linea1, 474, 10);
         cabref.FieldByName('auditado').AsString     := copy(linea1, 490, 20);
         cabref.FieldByName('profcab').AsString      := copy(linea1, 526, 6);
+        cabref.FieldByName('token').AsString        := token;
+        cabref.FieldByName('numerodoc').AsString    := numerodoc;
         try
           cabref.Post
          except
@@ -328,7 +358,7 @@ begin
         end;
 
         // Damos de Alta la Orden
-        auditoriacb.Registrar(nuevo_nroauditoria, utiles.sFormatoFecha(ifecha), icodos, iidzona, inrodoc, inombre, iidprof, '', '', '', '', icodos, utiles.sFormatoFecha(ifepedido), iprofcab, iiddiag, iobservacion, false, 'S', ianulada, expediente, nroaut);
+        auditoriacb.Registrar(nuevo_nroauditoria, utiles.sFormatoFecha(ifecha), icodos, iidzona, inrodoc, inombre, iidprof, '', '', '', '', icodos, utiles.sFormatoFecha(ifepedido), iprofcab, iiddiag, iobservacion, false, 'S', ianulada, expediente, nroaut, token, numerodoc);
         for i := 1 to lista.Count do begin
           didonline := copy(lista.Strings[i-1], 1, 29);
           ditems    := copy(lista.Strings[i-1], 32, 3);
@@ -403,11 +433,11 @@ begin
     while not eof(med) do begin
       readln(med, linea1);
       var1 := trim(copy(linea1, 1, 6));
-      var2 := trim(copy(linea1, 8, 5));
+      var2 := trim(copy(linea1, 8, 20));
       var3 := trim(copy(linea1, 14, 8));
-      var4 := trim(copy(linea1, 25, 5));
-      var4 := trim(copy(linea1, 36, 8));
-      var5 := copy(linea1, 52, 150);
+      var4 := trim(copy(linea1, 40, 5));
+      var4 := trim(copy(linea1, 51, 8));
+      var5 := copy(linea1, 67, 150);
 
       medicoos.Grabar(var1, var2, var5);
     end;
@@ -420,11 +450,11 @@ begin
     while not eof(mec) do begin
       readln(mec, linea1);
       var1 := trim(copy(linea1, 1, 6));
-      var2 := trim(copy(linea1, 8, 5));
+      var2 := trim(copy(linea1, 8, 20));
       var3 := trim(copy(linea1, 14, 8));
       var4 := trim(copy(linea1, 25, 5));
       var4 := trim(copy(linea1, 36, 8));
-      var5 := copy(linea1, 52, 150);
+      var5 := copy(linea1, 67, 150);
 
       medicoscabol.Grabar(var1, var2, var5);
     end;
@@ -840,6 +870,16 @@ begin
     end;
     cabref.Next;
   end;
+end;
+
+function TTAuditoriaOnLine.verificarOrdenFacturada(xnroauditoria: string): boolean;
+var
+  r: TQuery;
+begin
+  r := datosdb.tranSQL(cabref.DatabaseName, 'select count(nroauditoria) as cant from cab_ref where nroauditoria = ' + '''' + xnroauditoria + '''');
+  r.Open;
+  if r.FieldByName('cant').asInteger > 0 then result := true else result := false;
+  r.Close; r.Free;
 end;
 
 procedure TTAuditoriaOnLine.conectar;

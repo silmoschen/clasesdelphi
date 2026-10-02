@@ -65,6 +65,7 @@ TTListar = class(TObject)            // Superclase
 
  { Gestion para la Impresión de Memos }
   procedure   ListMemo(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TTable; largoDelTexto: integer); overload;
+  procedure   ListMemoQuery(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TQuery; largoDelTexto: integer); overload;
   function    ListMemoTitulos(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TTable; largoDelTexto: integer): Integer;
   procedure   ListMemoRecortandoStringIzquierda(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TTable; largoDelTexto: integer);
   procedure   ListMemoRecortandoEspaciosVericales(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TTable; largoDelTexto: integer);
@@ -674,6 +675,47 @@ begin
   end;
   LiberarMemoImpresiones;
 end;
+
+procedure TTListar.ListMemoQuery(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TQuery; largoDelTexto: integer);
+// Objetivo...: Gestionar la Impresión de Memos
+const
+  c: string = '';
+var
+  lineas, i, j: integer; lm: String;
+begin
+  //if not memo_iniciado then IniciarMemoImpresiones(xtabla, xcampo, largoDelTexto);
+
+  Application.CreateForm(TfmGMemo, fmGMemo);
+  if largoDelTexto > 0 then fmGMemo.R.Width := largoDelTexto;
+  fmGMemo.DTS.DataSet := xtabla;
+  fmGMemo.R.DataField := xcampo;
+  memo_iniciado       := True;
+
+  lineas := fmGMemo.R.Lines.Count;
+
+  For i := 1 to lineas do Begin
+    j := pos('.', fmGMemo.R.Lines[i-1]);
+    if Copy(fmGMemo.R.Lines[i-1], Length(fmGMemo.R.Lines[i-1]) - 1, 1) < 'a' then j := Length(fmGMemo.R.Lines[i-1]);
+    if Copy(fmGMemo.R.Lines[i-1], Length(fmGMemo.R.Lines[i-1]) - 1, 1) < 'a' then lm := Copy(fmGMemo.R.Lines[i-1], 1, (Length(fmGMemo.R.Lines[i-1]) - 2)) else lm := Copy(fmGMemo.R.Lines[i-1], 1, (Length(fmGMemo.R.Lines[i-1]) - 1));
+    if j = 0 then List.Linea(0, 0, c + fmGMemo.R.Lines[i-1], 1, xfuente, salida, 'S') else Begin
+    if Copy(fmGMemo.R.Lines[i-1], j + 1, 1) < 'a' then Begin
+      if cordX = 0 then List.Linea(cordX, 0, c + lm, 1, xfuente, salida, 'S') else Begin
+      List.Linea(0, 0, ' ', 1, xfuente, salida, 'N');
+      List.Linea(cordX, list.Lineactual, c + lm, 2, xfuente, salida, 'S');
+    end end else Begin
+      if cordX = 0 then List.Linea(cordX, 0, c + fmGMemo.R.Lines[i-1], 1, xfuente, salida, 'S') else Begin
+      List.Linea(0, 0, ' ', 1, xfuente, salida, 'N');
+      List.Linea(cordX, list.Lineactual, c + fmGMemo.R.Lines[i-1], 2, xfuente, salida, 'S');
+    end end;
+
+    // Verificamos Salto de Página; si el informe maneja saltos manuales
+    if reporte.tipo_salto = 3 then
+      if RealizarSaltoPagina(altotit) then IniciarNuevaPagina;
+  end;
+  end;
+  LiberarMemoImpresiones;
+end;
+
 
 function TTListar.ListMemoTitulos(xcampo, xfuente: string; cordX: byte; salida: char; xtabla: TTable; largoDelTexto: integer): Integer;
 // Objetivo...: Gestionar la Impresión de Memos

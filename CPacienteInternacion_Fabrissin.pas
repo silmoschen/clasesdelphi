@@ -8,7 +8,7 @@ uses CPersona, CBDT, SysUtils, DB, DBTables, CUtiles, CListar, CIDBFM, CObrasSoc
 type
 
 TTPaciente = class(TTPersona)
-  fenac, telefono, sexo, retiva, Edad, Nrodoc, Idbeneficio: string;
+  fenac, telefono, sexo, retiva, Edad, Nrodoc, Idbeneficio, Observaciones: string;
   tabla2: TTable;
  public
   { Declaraciones Públicas }
@@ -34,6 +34,9 @@ TTPaciente = class(TTPersona)
   function    getPacientes: TQuery;
 
   function    Nuevo: string;
+
+  procedure   GrabarObservacion(xcodigo, xobservacion: string);
+  procedure   getObservacion(xcodigo: string);
 
   procedure   vaciarBuffer;
   procedure   conectar;
@@ -377,6 +380,35 @@ Begin
   tperso.FieldByName('nrodoc').DisplayLabel := 'Nro. Doc.';
   if datosdb.verificarSiExisteCampo(tperso, 'grabadoiva') then tperso.FieldByName('gravadoiva').Visible := False;
 end;
+
+procedure TTPaciente.getObservacion(xcodigo: string);
+// Objetivo...: Cargar/iniciar los atributos para una instancia
+begin
+  if Buscar(xcodigo) then
+    begin
+      observaciones := tabla2.FieldByName('observaciones').AsString;
+    end
+  else
+    begin
+      observaciones := '';
+    end;
+end;
+
+procedure TTPaciente.GrabarObservacion(xcodigo, xobservacion: string);
+// Objetivo...: Almacenar una instacia de la clase
+begin
+  //if tabla2.recordcount > 20 then utiles.msgError('El demo no admite mas de 20 pacientes') else begin
+  if Buscar(xcodigo) then tabla2.Edit else tabla2.Append;
+  tabla2.FieldByName('codpac').AsString      := xcodigo;
+  tabla2.FieldByName('observaciones').AsString := xobservacion;
+  try
+    tabla2.Post
+  except
+    tabla2.Cancel
+  end;
+  datosdb.refrescar(tabla2);
+end;
+
 
 procedure TTPaciente.conectar;
 // Objetivo...: cerrar tablas de persistencia

@@ -10,7 +10,7 @@ type
 TTNomeclaturaOS = class
   Codos, Codigo, Descrip, Codref, Especial: String; Nroaut: Integer;
   Unidad, Unidades: Real;
-  tabla: TTable;
+  tabla, texport: TTable;
  public
   { Declaraciones Públicas }
   constructor Create;
@@ -39,6 +39,7 @@ TTNomeclaturaOS = class
   procedure   BorrarNBU(xcodos: string);
 
   procedure   MarcarPracticaDiferencial(xcodos, xcodigo: string);
+  procedure   Exportar;
 
   procedure   conectar;
   procedure   desconectar;
@@ -77,6 +78,29 @@ destructor TTNomeclaturaOS.Destroy;
 begin
   inherited Destroy;
 end;
+
+procedure TTNomeclaturaOS.Exportar;
+// Objetivo...: Exportar Datos
+Begin
+  texport := datosdb.openDB('nomeclados', '', '', dbs.DirSistema + '\actualizaciones_online\upload\estructu');
+  texport.Open;
+  tabla.First;
+  while not tabla.Eof do Begin
+    if datosdb.Buscar(texport, 'codos', 'codigo', tabla.FieldByName('codos').AsString, tabla.FieldByName('codigo').AsString) then texport.Edit else texport.Append;
+    texport.FieldByName('codos').AsString  := tabla.FieldByName('codos').AsString;
+    texport.FieldByName('codigo').AsString  := tabla.FieldByName('codigo').AsString;
+    texport.FieldByName('descrip').AsString := tabla.FieldByName('descrip').AsString;
+    texport.FieldByName('unidad').AsFloat   := tabla.FieldByName('unidad').AsFloat;
+    try
+      texport.Post
+    except
+      texport.Cancel
+    end;
+    tabla.Next;
+  End;             
+  datosdb.closeDB(texport);
+End;
+
 
 function TTNomeclaturaOS.Buscar(xcodos, xcodigo: String): Boolean;
 // Objetivo...: buscar una instancia
@@ -146,6 +170,11 @@ procedure TTNomeclaturaOS.Filtrar(xcodos: String);
 // Objetivo...: cerrar tablas de persistencia
 begin
   datosdb.Filtrar(tabla, 'codos = ' + '''' + xcodos + '''');
+   if (tabla.Active) then begin
+    tabla.FieldByName('codos').Visible := False;
+    tabla.FieldByName('codigo').DisplayLabel := 'Código'; tabla.FieldByName('descrip').DisplayLabel := 'Descripción'; tabla.FieldByName('codref').DisplayLabel := 'Cód.Ref'; tabla.FieldByName('nroaut').DisplayLabel := 'Nro.Aut.';
+    tabla.FieldByName('descrip').DisplayWidth := 60;
+  end;
 end;
 
 procedure TTNomeclaturaOS.QuitarFiltro;
@@ -265,10 +294,11 @@ var
   r: TQuery;
 begin
   tabla.Filtered := False;
+  datosdb.tranSQL(tabla.DatabaseName, 'delete from nomeclados where codos = ' + '''' + xdesde_codos + '''');
   r := setDeterminaciones(xdesde_codos);
   r.Open;
   while not r.Eof do begin
-    if Buscar(xa_codos, r.FieldByName('codigo').AsString) then tabla.Edit else tabla.Append;
+    tabla.Append;
     tabla.FieldByName('codos').AsString   := xa_codos;
     tabla.FieldByName('codigo').AsString  := r.FieldByName('codigo').AsString;
     tabla.FieldByName('descrip').AsString := r.FieldByName('descrip').AsString;

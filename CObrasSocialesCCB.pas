@@ -9,7 +9,7 @@ type
 
 TTObraSocial = class(TObject)            // Superclase
   codos, Nombre, categoria, Nombrec, direccion, codpost, localidad, codpfis, nrocuit, tope, capitada,
-  NoImporta, Periodo, Retieneiva, Codosdif, OSDif, Factnbu, Pernbu, FacturaNBU, Baja, Corteorden, Factexport, Convenio: string;
+  NoImporta, Periodo, Retieneiva, Codosdif, OSDif, Factnbu, Pernbu, FacturaNBU, Baja, Corteorden, Factexport, Convenio, GranEmpresa: string;
   UB, UG, RIEUB, RIEUG, porcentaje, topemin, topemax, retencioniva, valorNBU, valorNBUDif: real;
   MontoFijo, ArancelesDiferenciales, Rupturaorden: Boolean;
   tabla, apfijos, aranceles, retiva, arancelesNBU, apfijosNBU, arannbu, obsocial_reglas: TTable;
@@ -21,10 +21,12 @@ TTObraSocial = class(TObject)            // Superclase
   procedure   GrabarOS(xcodos, xNombre, xcategoria, xtope, xcapitada: string; xUB, xUG, xRIEUB, xRIEUG, xporcentaje, xtopemin, xtopemax, xretencioniva: real; xretieneiva, xfactnbu, xpernbu, xfactexport: String; xruptura_orden: boolean); overload;
   procedure   Grabar(xcodos, xNombre, xcategoria, xtope, xcapitada: string; xUB, xUG, xRIEUB, xRIEUG, xporcentaje, xtopemin, xtopemax, xretencioniva: real; xretieneiva, xfactnbu, xpernbu, xcorteorden: String; xruptura_orden: boolean); overload;
   procedure   Grabar(xcodos, xnombre, xdireccion, xcodpost, xlocalidad, xcodpfis, xnrocuit: string); overload;
+  procedure   GrabarGE(xcodos: string; xge: boolean);
   procedure   Borrar(xcodos: string);
   function    Buscar(xcodos: string): boolean;
   function    Nuevo: string;
   procedure   getDatos(xcodos: string);
+  function    getGE(xcodos: string): boolean;
   function    setobsocials: TQuery;
   function    setobsocialsAlf: TQuery;
   function    setobsocialsExportacion: TQuery;
@@ -307,6 +309,35 @@ begin
     end;
     }
   end;
+end;
+
+procedure   TTObraSocial.GrabarGE(xcodos: string; xge: boolean);
+begin
+  if (xge) then GranEmpresa := 'S' else GranEmpresa := 'N';
+  if Buscar(xcodos) then Begin
+    tabla.Edit;
+    tabla.FieldByName('granempresa').AsString  := GranEmpresa;
+    try
+      tabla.Post
+     except
+      tabla.Cancel
+    end;
+  end;
+  datosdb.refrescar(tabla);
+end;
+
+function TTObraSocial.getGE(xcodos: string): boolean;
+var
+ s: boolean;
+begin
+  s := false;
+  GranEmpresa := 'N';
+  if Buscar(xcodos) then Begin
+    GranEmpresa := tabla.FieldByName('granempresa').AsString;
+    if (GranEmpresa = 'S') then s := true;
+  end;
+
+  result := s;
 end;
 
 function TTObraSocial.Buscar(xcodos: string): boolean;

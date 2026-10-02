@@ -10,19 +10,26 @@ type
 TTPlantillaAnalisisClinicos = class(TObject)
   codigo, items, itemsParalelo, elemento, valoresn, resultado, imputable,
   observaciones, distancia, Encabezado, Detalle, Formula, Unidad,
-  Sigla, Ceros: string;
-  tabla, tabref, thojatrab, tsol: TTable;
+  Sigla, Ceros, p1, p2, p3, p4: string;
+  tabla, tabref, thojatrab, tsol, tabv2: TTable;
  public
-  { Declaraciones Públicas }
+  { Declaraciones Pï¿½blicas }
   constructor Create;
   destructor  Destroy; override;
 
   procedure   Grabar(xcodigo, xitems, xitemsParalelo, xelemento, xvaloresn, xresultado, ximputable, xdistancia, xformula, xunidad, xsigla, xceros: string; xcantitems: Integer);
+  procedure   GrabarP1(xcodigo, xitems, xp0, xp1, xp2, xp3: string);
+  procedure   GrabarPlantanV2(xid, xcodigo, xitems, xversion, xp1, xp2, xp3, xp4: string);
+  function    BuscarV2(xid: string): boolean;
+  procedure   getV2(xid: string);
+  function    getP2(xcodigo, xitems: string): string;
+  function    getP3(xcodigo, xitems: string): string;
   procedure   GrabarRef(xcodigo, xitems, xobservaciones: string);
   procedure   Borrar(xcodigo: string);
   function    BuscarRef(xcodigo, xitems: string): boolean;
   function    Buscar(xcodigo, xitems: string): boolean;
   procedure   getDatos(xcodigo, xitems: string);
+  function    getP1(xcodigo, xitems: string): string;
   procedure   getDatosRef(xcodigo, xitems: string);
   function    setPlantanalisis: TQuery; overload;
   function    setPlantanalisis(xcodigo: string): TQuery; overload;
@@ -43,6 +50,7 @@ TTPlantillaAnalisisClinicos = class(TObject)
   function    getplantanalisis: TQuery;
 
   function    getPlantanalisisBySigla(xsigla: string): TQuery;
+  function    getPlantanalisisByP1(xp1, xversion: string): TQuery;
 
   procedure   conectar;
   procedure   desconectar;
@@ -69,14 +77,16 @@ begin
   inherited Create;
   if (dbs.BaseClientServ = 'N') or (Length(Trim(dbs.baseDat_N)) = 0) then Begin
     tabla  := datosdb.openDB('plantan', 'codigo;items');     // Plantilla
-    tabref := datosdb.openDB('refplantan', 'codigo;items');  // Referencia de análisis
-    tsol   := datosdb.openDB('plantansolicitud', 'codigo;items');  // Referencia de análisis para Solicitudes
+    tabref := datosdb.openDB('refplantan', 'codigo;items');  // Referencia de anï¿½lisis
+    tsol   := datosdb.openDB('plantansolicitud', 'codigo;items');  // Referencia de anï¿½lisis para Solicitudes
+    tabv2  := datosdb.openDB('plantan_v2', 'id');
     dir    := dbs.baseDat;
   end;
   if (dbs.BaseClientServ = 'S') and (Length(Trim(dbs.baseDat_N)) > 0) then Begin
     tabla  := datosdb.openDB('plantan', 'codigo;items', '', dbs.baseDat_N);     // Plantilla
-    tabref := datosdb.openDB('refplantan', 'codigo;items', '', dbs.baseDat_N);  // Referencia de análisis
-    tsol   := datosdb.openDB('plantansolicitud', 'codigo;items', '', dbs.baseDat_N);  // Referencia de análisis para Solicitudes
+    tabref := datosdb.openDB('refplantan', 'codigo;items', '', dbs.baseDat_N);  // Referencia de anï¿½lisis
+    tsol   := datosdb.openDB('plantansolicitud', 'codigo;items', '', dbs.baseDat_N);  // Referencia de anï¿½lisis para Solicitudes
+    tabv2  := datosdb.openDB('plantan_v2', 'id', '', dbs.baseDat_N);
     dir    := dbs.baseDat_N;
   end;
 end;
@@ -152,6 +162,71 @@ begin
 
 end;
 
+procedure TTPlantillaAnalisisClinicos.GrabarP1(xcodigo, xitems, xp0, xp1, xp2, xp3: string);
+// Objetivo...: Grabar plantan.p0, p1, p2 y p3 buscado por codigo e items
+begin
+  if not Buscar(xcodigo, xitems) then Exit;
+  tabla.Edit;
+  if tabla.FindField('p0') <> nil then
+  begin
+    if Length(Trim(xp0)) = 0 then
+      tabla.FieldByName('p0').Clear
+    else
+      tabla.FieldByName('p0').AsString := xp0;
+  end;
+  if tabla.FindField('p1') <> nil then tabla.FieldByName('p1').AsString := xp1;
+  if tabla.FindField('p2') <> nil then tabla.FieldByName('p2').AsString := xp2;
+  if tabla.FindField('p3') <> nil then tabla.FieldByName('p3').AsString := xp3;
+  try
+    tabla.Post;
+  except
+    tabla.Cancel;
+  end;
+end;
+
+function TTPlantillaAnalisisClinicos.BuscarV2(xid: string): boolean;
+begin
+  if not tabv2.Active then tabv2.Open;
+  Result := datosdb.Buscar(tabv2, 'id', xid);
+end;
+
+procedure TTPlantillaAnalisisClinicos.getV2(xid: string);
+begin
+  p1 := ''; p2 := ''; p3 := ''; p4 := '';
+  if (BuscarV2(xid)) then begin
+    p1 := tabv2.FieldByName('p1').AsString;
+    p2 := tabv2.FieldByName('p2').AsString;
+    p3 := tabv2.FieldByName('p3').AsString;
+    p4 := tabv2.FieldByName('p4').AsString;
+  end;
+end;
+
+
+procedure TTPlantillaAnalisisClinicos.GrabarPlantanV2(xid, xcodigo, xitems, xversion, xp1, xp2, xp3, xp4: string);
+begin
+  if (xitems = '01') then begin
+    datosdb.tranSQL(tabv2.DatabaseName, 'delete from plantan_v2 where codigo = ' + '''' + xcodigo + '''');
+    datosdb.refrescar(tabv2);
+  end;
+
+  if not tabv2.Active then tabv2.Open;
+  if BuscarV2(xid) then tabv2.Edit else tabv2.Append;
+  tabv2.FieldByName('id').AsString := xid;
+  tabv2.FieldByName('codigo').AsString := xcodigo;
+  tabv2.FieldByName('items').AsString := xitems;
+  tabv2.FieldByName('version').AsString := xversion;
+  tabv2.FieldByName('id').AsString := xid;
+  tabv2.FieldByName('p1').AsString := xp1;
+  tabv2.FieldByName('p2').AsString := xp2;
+  tabv2.FieldByName('p3').AsString := xp3;
+  tabv2.FieldByName('p4').AsString := xp4;
+  try
+    tabv2.Post;
+  except
+    tabv2.Cancel;
+  end;
+end;
+
 procedure TTPlantillaAnalisisClinicos.GrabarRef(xcodigo, xitems, xobservaciones: string);
 // Objetivo...: Grabar Atributos del Objeto
 begin
@@ -167,7 +242,7 @@ begin
 end;
 
 procedure TTPlantillaAnalisisClinicos.Borrar(xcodigo: string);
-// Objetivo...: Eliminar un set de objetos, pertenecientes a un análisis concreto
+// Objetivo...: Eliminar un set de objetos, pertenecientes a un anï¿½lisis concreto
 begin
   datosdb.tranSQL(tabla.DatabaseName, 'DELETE FROM ' + tabla.TableName + ' WHERE codigo = ' + '"' + xcodigo + '"');
   loadList;
@@ -179,7 +254,7 @@ var
   i: integer;
 begin
   if (l <> nil) then begin
-    codigo := ''; items := ''; itemsParalelo := ''; elemento := ''; valoresn := ''; resultado := ''; imputable := ''; distancia := ''; formula := ''; ceros := '';
+    codigo := ''; items := ''; itemsParalelo := ''; elemento := ''; valoresn := ''; resultado := ''; imputable := ''; distancia := ''; formula := ''; ceros := ''; p1 := ''; p2 := ''; p3 := '';
     for i := 1 to l.Count do Begin
       objeto := TTPlantillaAnalisisClinicos(l.Items[i-1]);
       if (trim(objeto.codigo) = xcodigo) and (objeto.items = xitems) then begin
@@ -218,9 +293,33 @@ begin
     end
    else
     begin
-      codigo := ''; items := ''; itemsParalelo := ''; elemento := ''; valoresn := ''; resultado := ''; imputable := ''; distancia := ''; formula := ''; unidad := ''; sigla := ''; ceros := '';
+      codigo := ''; items := ''; itemsParalelo := ''; elemento := ''; valoresn := ''; resultado := ''; imputable := ''; distancia := ''; formula := ''; unidad := ''; sigla := ''; ceros := ''; p1 := ''; p2 := ''; p3 := '';
     end;
    if Trim(elemento) = '-' then elemento := '';
+end;
+
+function TTPlantillaAnalisisClinicos.getP1(xcodigo, xitems: string): string;
+begin
+  Result := '';
+  if Buscar(Trim(xcodigo), xitems) then
+    if tabla.FindField('p1') <> nil then
+      Result := tabla.FieldByName('p1').AsString;
+end;
+
+function TTPlantillaAnalisisClinicos.getP2(xcodigo, xitems: string): string;
+begin
+  Result := '';
+  if Buscar(Trim(xcodigo), xitems) then
+    if tabla.FindField('p2') <> nil then
+      Result := tabla.FieldByName('p2').AsString;
+end;
+
+function TTPlantillaAnalisisClinicos.getP3(xcodigo, xitems: string): string;
+begin
+  Result := '';
+  if Buscar(Trim(xcodigo), xitems) then
+    if tabla.FindField('p3') <> nil then
+      Result := tabla.FieldByName('p3').AsString;
 end;
 
 procedure  TTPlantillaAnalisisClinicos.getDatosRef(xcodigo, xitems: string);
@@ -242,13 +341,13 @@ begin
 end;
 
 procedure TTPlantillaAnalisisClinicos.ListarModelo(xdcodigo, xhcodigo: string; salida: char);
-// Objetivo...: Listar Plantilla de análisis clínicos
+// Objetivo...: Listar Plantilla de anï¿½lisis clï¿½nicos
 var
   l, r, t: TQuery; distancia: integer; itp, dtl: boolean;
 begin
   List.Setear(salida);
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
-  List.Titulo(0, 0, ' Modelo de Presentación Informes Análisis Clínicos', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Modelo de Presentaciï¿½n Informes Anï¿½lisis Clï¿½nicos', 1, 'Arial, negrita, 14');
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
   List.Titulo(0, 0, utiles.espacios(3) +  'Elemento', 1, 'Arial, cursiva, 8');
   List.Titulo(55, list.Lineactual, 'Items Paralelos', 2, 'Arial, cursiva, 8');
@@ -261,7 +360,7 @@ begin
   while not l.EOF do Begin
     if (l.FieldByName('codigo').AsString >= xdcodigo) and (l.FieldByName('codigo').AsString <= xhcodigo) then Begin
       if datosdb.Buscar(tabla, 'codigo', 'items', l.FieldByName('codigo').AsString, '01') then Begin
-        // Datos del Análisis
+        // Datos del Anï¿½lisis
         nomeclatura.getDatos(l.FieldByName('codigo').AsString);
         List.Linea(0, 0, nomeclatura.codigo + '   ' + UpperCase(nomeclatura.descrip), 1, 'Arial, negrita, 9', salida, 'N');
         // Extraemos los items de la plantilla
@@ -269,7 +368,7 @@ begin
         r := setPlantanalisis(l.FieldByName('codigo').AsString); t := setPlantanalisis(l.FieldByName('codigo').AsString);
         r.Open; t.Open;
 
-        // Ahora imprimimos los items paralelo a la desripción del anlalisis - Nivel 0
+        // Ahora imprimimos los items paralelo a la desripciï¿½n del anlalisis - Nivel 0
         t.First; itp := False;
         while not t.EOF do Begin
           if t.FieldByName('itemsParalelo').AsString = '00' then Begin
@@ -307,7 +406,7 @@ begin
           r.Next;
         end;
         r.Close; t.Close;
-        // Fin Impresión de Items
+        // Fin Impresiï¿½n de Items
         dtl := True;
       end;
     end;
@@ -320,11 +419,11 @@ begin
 end;
 
 procedure TTPlantillaAnalisisClinicos.Listar(xdcodigo, xhcodigo: string; salida: char);
-// Objetivo...: Listar Plantilla de análisis clínicos
+// Objetivo...: Listar Plantilla de anï¿½lisis clï¿½nicos
 begin
   List.Setear(salida);
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
-  List.Titulo(0, 0, ' Modelo de Presentación Informes Análisis Clínicos', 1, 'Arial, negrita, 14');
+  List.Titulo(0, 0, ' Modelo de Presentaciï¿½n Informes Anï¿½lisis Clï¿½nicos', 1, 'Arial, negrita, 14');
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
   List.Titulo(0, 0, utiles.espacios(3) +  'Elemento', 1, 'Arial, cursiva, 8');
   List.Titulo(38, list.Lineactual, 'Valores Normales', 2, 'Arial, cursiva, 8');
@@ -368,7 +467,7 @@ begin
 end;
 
 function TTPlantillaAnalisisClinicos.verificarCodNomeclador(xcodigo: string): boolean;
-// Objetivo...: Verificar la existencia del código del nomeclador
+// Objetivo...: Verificar la existencia del cï¿½digo del nomeclador
 var
   b: boolean;
 begin
@@ -459,6 +558,11 @@ begin
   result := datosdb.tranSQL(tabla.DatabaseName, 'select codigo, items, ceros from plantan where sigla = ' + '''' + xsigla + '''');
 end;
 
+function  TTPlantillaAnalisisClinicos.getPlantanalisisByP1(xp1, xversion: string): TQuery;
+begin
+  result := datosdb.tranSQL(tabla.DatabaseName, 'select codigo, items, p1, p2, p3, p4, p5 from plantan_v2 where p1 = ' + '''' + Trim(xp1) + '''' + ' and version = ' + '''' + xversion + '''');
+end;
+
 procedure TTPlantillaAnalisisClinicos.conectar;
 // Objetivo...: Abrir tablas de persistencia
 begin
@@ -468,6 +572,7 @@ begin
     if not tabla.Active then tabla.Open;
     if not tabref.Active then tabref.Open;
     if not tsol.Active then tsol.Open;
+    if not tabv2.Active then tabv2.Open;
     if (l = nil) then loadList;
   end;
   Inc(conexiones);
@@ -483,6 +588,7 @@ begin
     datosdb.closeDB(tabla);
     datosdb.closeDB(tabref);
     datosdb.closeDB(tsol);
+    datosdb.closeDB(tabv2);
   end;
 end;
 

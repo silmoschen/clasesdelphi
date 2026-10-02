@@ -34,6 +34,7 @@ TTProfesional = class(TTPersona)
   procedure   BorrarCategorizacion(xidprof, xperiodo: String);
 
   function    setProfesionalesAlf: TQuery;
+  function    getProfesionalesActivos: TQuery;
   function    setProfesionalesAlfRetIVA: TQuery;
   function    setPorcentajeCategoria(xidprof: String): real;
 
@@ -295,6 +296,13 @@ function TTProfesional.setProfesionalesAlf: TQuery;
 begin
   Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM profesio ORDER BY Nombre');
 end;
+
+function TTProfesional.getProfesionalesActivos: TQuery;
+// Objetivo...: retornar los profesionales en un set
+begin
+  Result := datosdb.tranSQL(DBConexion, 'SELECT * FROM profesio where baja is NULL ORDER BY Nombre');
+end;
+
 
 function TTProfesional.setProfesionalesAlfRetIVA: TQuery;
 // Objetivo...: retornar los profesionales en un set

@@ -12,7 +12,7 @@ TTSolicitudAnalisisFabrissin = class(TTSolicitudAnalisis)
   Idquederiv, Imagen, L1, L2, L3, L4: String;
   plantillasIMP, fotologo: TTable;
  public
-  { Declaraciones Públicas }
+  { Declaraciones Pï¿½blicas }
   constructor Create;
   destructor  Destroy; override;
 
@@ -174,7 +174,7 @@ begin
 end;
 
 procedure TTSolicitudAnalisisFabrissin.TituloSol(salida: char);
-// Objetivo...: Listar títulos de resultados de análisis
+// Objetivo...: Listar tï¿½tulos de resultados de anï¿½lisis
 var
   i: Integer;
 begin
@@ -221,14 +221,14 @@ begin
      list.Linea(0, 0, ' ', 1, 'Arial, negrita, 5', salida, 'S');
      List.Subtitulo(0, 0, '                   ', 1, 'Times New Roman, normal, 9');
      List.Subtitulo(0, 0, '                   Paciente', 1, 'Times New Roman, normal, 12'); List.Subtitulo(30, List.Lineactual, ':  ' + UpperCase(paciente.Nombre), 2, 'Times New Roman, normal, 12');
-     List.Subtitulo(0, 0, '                   Protocolo Nº', 1, 'Times New Roman, normal, 12'); List.Subtitulo(30, List.Lineactual, ':  ' + protocolo, 2, 'Times New Roman, normal, 12');
+     List.Subtitulo(0, 0, '                   Protocolo Nï¿½', 1, 'Times New Roman, normal, 12'); List.Subtitulo(30, List.Lineactual, ':  ' + protocolo, 2, 'Times New Roman, normal, 12');
      List.Subtitulo(0, 0, list.Linealargopagina(salida), 1, 'Arial, normal, 11');
      List.Subtitulo(0, 0, '                   ', 1, 'Times New Roman, normal, 24');
    end;
 end;
 
 procedure TTSolicitudAnalisisFabrissin.EncabezadoDePagina(salida: char);
-// Objetivo...: Listar el inicio de la Nueva página
+// Objetivo...: Listar el inicio de la Nueva pï¿½gina
 begin
   if (salida = 'P') or (salida = 'I') then list.IniciarNuevaPagina;
 end;
@@ -253,11 +253,11 @@ begin
         for i := 1 to StrToInt(Trim(titulos.margenSup)) do list.Linea(0, 0, '', 1, 'Arial, normal, 8', salida, 'S');
       List.Linea(0, 0, '                   Paciente', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, List.Lineactual, ':  ' + UpperCase(paciente.Nombre), 2, 'Times New Roman, normal, 12', salida, 'S');
       List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
-      List.Linea(0, 0, '                   Indicación del Dr/a.', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, list.lineactual, ':  ' + profesional.Nombres, 2, 'Times New Roman, normal, 12', salida, 'S');
+      List.Linea(0, 0, '                   Indicaciï¿½n del Dr/a.', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, list.lineactual, ':  ' + profesional.Nombres, 2, 'Times New Roman, normal, 12', salida, 'S');
       List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
       List.Linea(0, 0, '                   Fecha', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, List.Lineactual, ':  ' + Copy(solicitud.FieldByName('fecha').AsString, 7, 2) + ' de ' + meses[StrToInt(Copy(solicitud.FieldByName('fecha').AsString, 5, 2))] + ' ' +  Copy(solicitud.FieldByName('fecha').AsString, 1, 4) + h, 2, 'Times New Roman, normal, 12', salida, 'S');
       List.Linea(0, 0, ' ', 1, 'Arial, normal, 5', salida, 'S');
-      List.Linea(0, 0, '                   Protocolo Nº', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, List.Lineactual, ':  ' + solicitud.FieldByName('protocolo').AsString, 2, 'Times New Roman, normal, 12', salida, 'S');
+      List.Linea(0, 0, '                   Protocolo Nï¿½', 1, 'Times New Roman, normal, 12', salida, 'N'); List.Linea(30, List.Lineactual, ':  ' + solicitud.FieldByName('protocolo').AsString, 2, 'Times New Roman, normal, 12', salida, 'S');
       if titulos.margenInf = '0' then Begin
         List.Linea(0, 0, ' ', 1, 'Arial, normal, 10', salida, 'S');
         For i := 1 to titulos.lineas do List.Linea(0, 0, ' ', 1, 'Arial, normal, 8', salida, 'S');   // Lineas en blanco
@@ -288,11 +288,11 @@ begin
       end;
       List.LineaTxt(lin, True);
       List.LineaTxt('   Paciente            : ' + UpperCase(paciente.Nombre), True);
-      List.LineaTxt('   Indicación del Dr/a.: ' + profesional.Nombres, True);
+      List.LineaTxt('   Indicaciï¿½n del Dr/a.: ' + profesional.Nombres, True);
       List.LineaTxt('', True);
       List.LineaTxt('   Fecha               : ' + Copy(solicitud.FieldByName('fecha').AsString, 7, 2) + ' de ' + meses[StrToInt(Copy(solicitud.FieldByName('fecha').AsString, 5, 2))] + ' ' +  Copy(solicitud.FieldByName('fecha').AsString, 1, 4), True);
       List.LineaTxt('', True);
-      List.LineaTxt('   Protocolo Nº        : ' + solicitud.FieldByName('protocolo').AsString, True);
+      List.LineaTxt('   Protocolo Nï¿½        : ' + solicitud.FieldByName('protocolo').AsString, True);
       if titulos.margenInf = '0' then Begin
         List.LineaTxt('', True);
         For i := 1 to titulos.lineas do List.LineaTxt('', True);   // Lineas en blanco
@@ -344,13 +344,13 @@ begin
      if verificarItemsEnLista(detSel, objeto1.Codanalisis) then Begin
       if objeto1.Codanalisis <> xcodanalisisanter then Begin
 
-        if Length(Trim(xcodanalisisanter)) > 0 then Begin // Observaciones de análisis
+        if Length(Trim(xcodanalisisanter)) > 0 then Begin // Observaciones de anï¿½lisis
 
           if (salida = 'P') or (salida = 'I') then Begin
             List.Linea(0, 0, '  ', 1, 'Arial, normal, 5', salida, 'S');
             if Buscar(xnrosolanter, xcodanalisisanter) then list.ListMemo('observaciones', 'Arial, cursiva, 9', 0, salida, obsanalisis, 0); // Si existen observaciones
             List.Linea(0, 0, '  ', 1, 'Arial, normal, 5', salida, 'S');
-            if not List.EfectuoSaltoPagina then List.Linea(0, 0, '  ', 1, 'Arial, normal, 10', salida, 'S') else Begin // En la misma página
+            if not List.EfectuoSaltoPagina then List.Linea(0, 0, '  ', 1, 'Arial, normal, 10', salida, 'S') else Begin // En la misma pï¿½gina
               List.Linea(0, 0, ' ', 1, 'Arial, normal, 16', salida, 'S');
               List.Linea(0, 0, ' ', 1, 'Arial, normal, 24', salida, 'S');
             end;
@@ -381,11 +381,11 @@ begin
           List.LineaTxt(' ' + utiles.StringLongitudFija(UpperCase(nomeclatura.descrip), 30), True);
         end;
 
-        f := False; // Impresión de Items paralelos - a la descripción del análisis
+        f := False; // Impresiï¿½n de Items paralelos - a la descripciï¿½n del anï¿½lisis
         for k := 1 to t.Count do Begin
           objeto2 := TTSolicitudAnalisisFabrissin(t.Items[k-1]);
           plantanalisis.getDatos(objeto2.Codanalisis, objeto2.Items);
-          if (plantanalisis.itemsParalelo = '00') and (objeto2.Codanalisis = objeto1.Codanalisis) then Begin  // Items paralelo a la descripción del análisis
+          if (plantanalisis.itemsParalelo = '00') and (objeto2.Codanalisis = objeto1.Codanalisis) then Begin  // Items paralelo a la descripciï¿½n del anï¿½lisis
             if Length(Trim(plantanalisis.distancia)) = 0 then distancia := 0 else distancia := StrToInt(plantanalisis.distancia);
 
             if (salida = 'P') or (salida = 'I') then
@@ -403,7 +403,7 @@ begin
         if (salida = 'T') then
           if not f then List.LineaTxt('', True);
 
-        // Fin Impresión de Items paralelos
+        // Fin Impresiï¿½n de Items paralelos
         if (salida = 'P') or (salida = 'I') then
           List.Linea(0, 0, ' ', 1, 'Arial, normal, 6', salida, 'S');
 
@@ -413,7 +413,7 @@ begin
 
       plantanalisis.getDatos(objeto1.Codanalisis, objeto1.Items);
       if Length(Trim(plantanalisis.distancia)) = 0 then distancia := 0 else distancia := StrToInt(plantanalisis.distancia);
-      // Impresión de Items independientes
+      // Impresiï¿½n de Items independientes
       if (plantanalisis.imputable = 'N') and (Length(Trim(plantanalisis.itemsParalelo)) = 0)  then Begin
 
         if (salida = 'P') or (salida = 'I') then Begin
@@ -498,7 +498,7 @@ begin
           end;
         end;
 
-        // Impresión de Items paralelos - a los items comunes
+        // Impresiï¿½n de Items paralelos - a los items comunes
 
         for n := 1 to t.Count do Begin
           objeto4 := TTSolicitudAnalisisFabrissin(t.Items[n-1]);
@@ -545,7 +545,7 @@ begin
           if itp then List.LineaTxt('', True);
 
 
-        // Fin Impresión de Items paralelos - a los items comunes
+        // Fin Impresiï¿½n de Items paralelos - a los items comunes
       end;
 
       if list.RealizarSaltoPagina(list.altotit) then EncabezadoDePagina(salida);
@@ -638,7 +638,7 @@ begin
 
         nomeclatura.getDatos(detsol.FieldByName('codanalisis').AsString);
         list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
-        list.Linea(0, 0, 'Código: ' + nomeclatura.codigo + '  ' + nomeclatura.descrip, 1, 'Arial, negrita, 9', salida, 'S');
+        list.Linea(0, 0, 'Cï¿½digo: ' + nomeclatura.codigo + '  ' + nomeclatura.descrip, 1, 'Arial, negrita, 9', salida, 'S');
         list.Linea(0, 0, '', 1, 'Arial, normal, 5', salida, 'S');
 
         r := plantanalisis.setItemsSol(detsol.FieldByName('codanalisis').AsString);
@@ -660,7 +660,7 @@ begin
 end;
 
 procedure TTSolicitudAnalisisFabrissin.ImprimirSobre(xnombre: string; xlineas, xmargeniz: Integer; salida: char);
-// Objetivo...: generar etiqueta de impresión de sobres
+// Objetivo...: generar etiqueta de impresiï¿½n de sobres
 var
   i: integer;
 begin
@@ -699,7 +699,7 @@ Begin
     list.FinList;
     list.largoImpresionMemo := 0;
   end else
-    utiles.msgError('No hay Formato de Impresión Definido ...!');
+    utiles.msgError('No hay Formato de Impresiï¿½n Definido ...!');
 End;
 
 procedure TTSolicitudAnalisisfabrissin.ListarSolicitudesQueDerivaron(xdfecha, xhfecha: String; xresumen: Boolean; salida: char);
@@ -713,9 +713,9 @@ begin
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 14');
   List.Titulo(0, 0, 'Entidades que Derivaron Protocolos en el Lapso: ' + xdfecha + '-' + xhfecha, 1, 'Arial, negrita, 14');
   List.Titulo(0, 0, ' ', 1, 'Arial, normal, 5');
-  List.Titulo(0, 0, 'Nº Prot.', 1, 'Arial, cursiva, 8');
+  List.Titulo(0, 0, 'Nï¿½ Prot.', 1, 'Arial, cursiva, 8');
   List.Titulo(15, list.Lineactual, 'Paciente', 2, 'Arial, cursiva, 8');
-  List.Titulo(60, list.Lineactual, 'Entidad que Derivó', 3, 'Arial, cursiva, 8');
+  List.Titulo(60, list.Lineactual, 'Entidad que Derivï¿½', 3, 'Arial, cursiva, 8');
   List.Titulo(0, 0, List.linealargopagina(salida), 1, 'Arial, normal, 11');
   List.Titulo(0, 0, ' ', 1, 'Arial, negrita, 5');
 
@@ -812,34 +812,34 @@ begin
   List.Linea(0, 0, 'Hoja de Trabajo ', 1, 'Arial, negrita, 14', salida, 'S');
   List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
 
-  // 1º Línea
+  // 1ï¿½ Lï¿½nea
   List.Linea(0, 0, 'Nombre ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + paciente.nombre, 2, 'Arial, normal, 9', salida, 'S');
-  // 2º Línea
+  // 2ï¿½ Lï¿½nea
   if Copy(paciente.fenac, 7, 2) > '05' then s := '19' else s := '20';
   x := Copy(paciente.Fenac, 1, 6) + s + Copy(paciente.Fenac, 7, 2);
   if Length(Trim(paciente.fenac)) > 0 then edadpac := IntToStr(utiles.Edad(x)) else edadpac := '';
   List.Linea(0, 0, 'Edad ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + edadpac, 2, 'Arial, normal, 9', salida, 'S');
-  // 3º Línea
-  List.Linea(0, 0, 'Nº Solicitud', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + solicitud.FieldByName('nrosolicitud').AsString, 2, 'Arial, normal, 10', salida, 'S');
-  // 4º Línea
+  // 3ï¿½ Lï¿½nea
+  List.Linea(0, 0, 'Nï¿½ Solicitud', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + solicitud.FieldByName('nrosolicitud').AsString, 2, 'Arial, normal, 10', salida, 'S');
+  // 4ï¿½ Lï¿½nea
   List.Linea(0, 0, 'Fecha ', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + fecha, 2, 'Arial, normal, 9', salida, 'S');
-  // 5º Línea
+  // 5ï¿½ Lï¿½nea
   List.Linea(0, 0, 'Profesional', 1, 'Arial, normal, 9', salida, 'N'); List.Linea(11, list.Lineactual, ':  ' + profesional.nombres, 2, 'Arial, normal, 9', salida, 'S');
-  // 6º Línea
+  // 6ï¿½ Lï¿½nea
   List.Linea(0, 0, ' ', 1, 'Arial, normal, 4', salida, 'S');
-  // 7º Línea
+  // 7ï¿½ Lï¿½nea
   List.Linea(0, 0, 'Abona', 1, 'Arial, cursiva, 8', salida, 'N'); List.Linea(6, list.Lineactual, ':', 2, 'Arial, cursiva, 8', salida, 'N'); List.importe(15, list.Lineactual, '', total, 3, 'Arial, cursiva, 8');
   List.Linea(16, list.Lineactual, 'Entrega', 4, 'Arial, normal, 8', salida, 'N'); List.Linea(22, list.Lineactual, ':', 5, 'Arial, normal, 8', salida, 'N'); List.importe(31, list.Lineactual, '', entrega, 6, 'Arial, normal, 8');
   List.Linea(34, list.Lineactual, 'Saldo', 7, 'Arial, normal, 8', salida, 'N'); List.Linea(39, list.Lineactual, ':', 8, 'Arial, normal, 8', salida, 'N'); List.importe(49, list.Lineactual, '', total - entrega, 9, 'Arial, normal, 8');
 
   List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
   List.Linea(0, 0, 'Prometido para el:  ' + retiraFecha + '  -  ' + retiraHora + ' Hs.', 1, 'Arial, normal, 9', salida, 'S');
-  // 8º Línea
+  // 8ï¿½ Lï¿½nea
   List.Linea(0, 0, ' ', 1, 'Arial, negrita, 8', salida, 'S');
   List.Linea(0, 0, 'Solicitud:', 1, 'Arial, cursiva, 9', salida, 'S');
   List.Linea(0, 0, ' ', 1, 'Arial, negrita, 5', salida, 'S');
 
-  // Obtenemos la lista de análisis
+  // Obtenemos la lista de anï¿½lisis
   r := setAnalisis(xnrosolicitud);
   r.Open; r.First;
   while not r.EOF do Begin
@@ -924,7 +924,7 @@ begin
 end;
 
 procedure TTSolicitudAnalisisFabrissin.Depurar(xfecha: string);
-// Objetivo...: Mover Instancias al registro histórico
+// Objetivo...: Mover Instancias al registro histï¿½rico
 var
   lista: TStringList;
   cantreg, i: Integer;
@@ -955,7 +955,7 @@ begin
   while not solicitud.EOF do Begin
     if solicitud.FieldByName('fecha').AsString <=  utiles.sExprFecha2000(xfecha) then Begin
         Inc(i);
-        utiles.MsgProcesandoDatos('Procesando Prot. Nº : ' + solicitud.FieldByName('nrosolicitud').AsString + '  -  ' + IntToStr(i) + ' de ' + IntToStr(cantreg) + '  a Depurar.');
+        utiles.MsgProcesandoDatos('Procesando Prot. Nï¿½ : ' + solicitud.FieldByName('nrosolicitud').AsString + '  -  ' + IntToStr(i) + ' de ' + IntToStr(cantreg) + '  a Depurar.');
 
         // Transferencias al historico
         datosdb.Filtrar(detsol, 'nrosolicitud = ' + '''' + solicitud.FieldByName('nrosolicitud').AsString + '''');
@@ -1229,7 +1229,7 @@ Begin
 
   profesional.getDatos(solanalisis.codprof);
   cordx.Add('3,7'); cordy.Add('2,3');
-  linea.Add('Médico: ' + profesional.nombres);
+  linea.Add('Mï¿½dico: ' + profesional.nombres);
           
   c := 2.6;
 
@@ -1259,19 +1259,19 @@ begin
   i := 0; j := 0; v9984 := 0; PorcentajeDifObraSocial := 0; PorcentajeDif9984 := 0;
 
   if obsocial.FactNBU = 'N' then Begin
-    // 1º Verificamos que el analisis no tenga monto Fijo - Teniendo en cuenta períodos
+    // 1ï¿½ Verificamos que el analisis no tenga monto Fijo - Teniendo en cuenta perï¿½odos
     i := obsocial.setMontoFijo(xcodos, xcodanalisis, periodo);
-    // 2º Verificamos que el analisis no tenga monto Fijo
+    // 2ï¿½ Verificamos que el analisis no tenga monto Fijo
     if i = 0 then i := obsocial.VerifcarSiElAnalisisTieneMontoFijo(xcodos, xcodanalisis);
 
     if i = 0 then Begin
-      // Cálculamos el valor del análisis
+      // Cï¿½lculamos el valor del anï¿½lisis
       i := (xOSUB * xNOUB) + (xOSUG * xNOUG);
       montoFijo := False;
     end else montoFijo := True;
-    // Calculamos el valor del codigo de toma y recepción
+    // Calculamos el valor del codigo de toma y recepciï¿½n
     if Length(Trim(nomeclatura.cftoma)) > 0 then Begin
-      codftoma := nomeclatura.cftoma;  // Capturamos el código fijo de toma y recepcion
+      codftoma := nomeclatura.cftoma;  // Capturamos el cï¿½digo fijo de toma y recepcion
       nomeclatura.getDatos(codftoma);
       j := obsocial.VerifcarSiElAnalisisTieneMontoFijo(xcodos, codftoma);   // Verificamos si el 9984 tiene Monto Fijo
 
